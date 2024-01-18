@@ -417,12 +417,17 @@ insertSelectOptions(PGSelectStmt *stmt,
 }
 
 static PGNode *
-makeSetOp(PGSetOperation op, bool all, PGNode *larg, PGNode *rarg)
+makeSetOp(PGSetOperation op, PGList *all, PGNode *larg, PGNode *rarg)
 {
 	PGSelectStmt *n = makeNode(PGSelectStmt);
-
+	if(!list_head(all)) {
+		n->all = true;
+	} else {
+		if (lfirst(list_head(all)) && !IsA(lfirst(list_head(all)), PGAStar))
+			n->correspondingClause = all;
+		n->all = false;
+	}
 	n->op = op;
-	n->all = all;
 	n->larg = (PGSelectStmt *) larg;
 	n->rarg = (PGSelectStmt *) rarg;
 	return (PGNode *) n;

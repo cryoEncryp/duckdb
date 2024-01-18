@@ -144,7 +144,7 @@ static void insertSelectOptions(PGSelectStmt *stmt,
 								PGNode *limitOffset, PGNode *limitCount,
 								PGWithClause *withClause,
 								core_yyscan_t yyscanner);
-static PGNode *makeSetOp(PGSetOperation op, bool all, PGNode *larg, PGNode *rarg);
+static PGNode *makeSetOp(PGSetOperation op, PGList *all, PGNode *larg, PGNode *rarg);
 static PGNode *doNegate(PGNode *n, int location);
 static void doNegateFloat(PGValue *v);
 static PGNode *makeAndExpr(PGNode *lexpr, PGNode *rexpr, int location);

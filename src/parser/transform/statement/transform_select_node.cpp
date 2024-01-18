@@ -6,6 +6,7 @@
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/transformer.hpp"
 #include "duckdb/parser/query_node/cte_node.hpp"
+#include "iostream"
 
 namespace duckdb {
 
@@ -121,6 +122,7 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			             materialized_ctes);
 		}
 		if (stmt.correspondingClause  != nullptr) {
+			std::cout << "call \n";
 			auto modifier = make_uniq<DistinctModifier>();
 			// checks distinct on clause
 			auto target = PGPointerCast<duckdb_libpgquery::PGNode>(stmt.correspondingClause->head->data.ptr_value);
@@ -137,7 +139,7 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			throw Exception("Failed to transform setop children.");
 		}
 
-		result.setop_all = stmt.correspondingClause  != nullptr ? true : stmt.all;
+		result.setop_all =  stmt.all;
 		switch (stmt.op) {
 		case duckdb_libpgquery::PG_SETOP_UNION:
 			result.setop_type = SetOperationType::UNION;

@@ -256,16 +256,6 @@ simple_select:
 					n->fromClause = list_make1($2);
 					$$ = (PGNode *)n;
 				}
-            | select_clause UNION corresponding_by select_clause
-                {
-                    PGSelectStmt *n = makeNode(PGSelectStmt);
-                    n->op = PG_SETOP_UNION;
-                    n->targetList = list_make1(makeNode(PGAStar));
-                    n->larg = (PGSelectStmt *) $1;
-                    n->rarg = (PGSelectStmt *) $4;
-                    n->correspondingClause = $3;
-                    $$ = (PGNode *) n;
-                }
             | select_clause UNION all_or_distinct by_name select_clause
 				{
 					$$ = makeSetOp(PG_SETOP_UNION_BY_NAME, $3, $1, $5);
@@ -554,17 +544,16 @@ opt_table:	TABLE									{}
 		;
 
 all_or_distinct:
-			ALL										{ $$ = true; }
-			| DISTINCT								{ $$ = false; }
-			| /*EMPTY*/								{ $$ = false; }
+			ALL										  { $$ = list_make1(NIL); }
+			| DISTINCT								  { $$ = list_make1(makeNode(PGAStar));}
+            | DISTINCT ON '(' expr_list_opt_comma ')' { $$ = $4;}
+			| /*EMPTY*/								  { $$ = list_make1(makeNode(PGAStar)); }
 		;
 
 by_name:
             BY NAME_P                                     { }
         ;
-corresponding_by:
-            CORRESPONDING BY '(' expr_list_opt_comma ')'                       { $$ = $4 }
-        ;
+
 
 /* We use (NIL) as a placeholder to indicate that all target expressions
  * should be placed in the DISTINCT list during parsetree analysis.

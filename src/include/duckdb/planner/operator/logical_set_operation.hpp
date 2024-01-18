@@ -29,7 +29,7 @@ public:
 	    : LogicalOperator(type), table_index(table_index), column_count(column_count), setop_all(setop_all),
 	      allow_out_of_order(allow_out_of_order) {
 		D_ASSERT(type == LogicalOperatorType::LOGICAL_UNION || type == LogicalOperatorType::LOGICAL_EXCEPT ||
-		         type == LogicalOperatorType::LOGICAL_INTERSECT);
+		         type == LogicalOperatorType::LOGICAL_INTERSECT || type == LogicalOperatorType::LOGICAL_CORRESPONDING_BY);
 		children.push_back(std::move(top));
 		children.push_back(std::move(bottom));
 	}

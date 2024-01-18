@@ -111,6 +111,9 @@ unique_ptr<LogicalOperator> Binder::CreatePlan(BoundSetOperationNode &node) {
 	case SetOperationType::INTERSECT:
 		logical_type = LogicalOperatorType::LOGICAL_INTERSECT;
 		break;
+	case SetOperationType::UNION_CORRESPONDING_BY:
+		logical_type = LogicalOperatorType::LOGICAL_CORRESPONDING_BY;
+		break;
 	default:
 		D_ASSERT(false);
 		break;

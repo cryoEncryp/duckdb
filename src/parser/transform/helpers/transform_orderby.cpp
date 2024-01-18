@@ -2,6 +2,7 @@
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/transformer.hpp"
 #include "duckdb/parser/expression/star_expression.hpp"
+#include "iostream"
 
 namespace duckdb {
 
@@ -12,6 +13,7 @@ bool Transformer::TransformOrderBy(duckdb_libpgquery::PGList *order, vector<Orde
 
 	for (auto node = order->head; node != nullptr; node = node->next) {
 		auto temp = reinterpret_cast<duckdb_libpgquery::PGNode *>(node->data.ptr_value);
+		std::cout << "test";
 		if (temp->type == duckdb_libpgquery::T_PGSortBy) {
 			OrderType type;
 			OrderByNullType null_order;

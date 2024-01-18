@@ -1229,7 +1229,7 @@ typedef struct PGPivotStmt {
  * whether it is a simple or compound SELECT.
  * ----------------------
  */
-typedef enum PGSetOperation { PG_SETOP_NONE = 0, PG_SETOP_UNION, PG_SETOP_INTERSECT, PG_SETOP_EXCEPT, PG_SETOP_UNION_BY_NAME } PGSetOperation;
+typedef enum PGSetOperation { PG_SETOP_NONE = 0, PG_SETOP_UNION, PG_SETOP_INTERSECT, PG_SETOP_EXCEPT, PG_SETOP_UNION_BY_NAME, PG_SETOP_UNION_CORRESPONDING_BY} PGSetOperation;
 
 typedef struct PGSelectStmt {
 	PGNodeTag type;
@@ -1266,6 +1266,7 @@ typedef struct PGSelectStmt {
 	 * SelectStmts.
 	 */
 	PGList *sortClause;       /* sort clause (a list of SortBy's) */
+	PGList *correspondingClause;	/* corresponding list */
 	PGNode *limitOffset;      /* # of result tuples to skip */
 	PGNode *limitCount;       /* # of result tuples to return */
 	PGNode *sampleOptions;    /* sample options (if any) */

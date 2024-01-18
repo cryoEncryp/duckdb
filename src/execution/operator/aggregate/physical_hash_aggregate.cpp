@@ -14,6 +14,7 @@
 #include "duckdb/planner/expression/bound_aggregate_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "iostream"
 
 namespace duckdb {
 
@@ -123,6 +124,25 @@ PhysicalHashAggregate::PhysicalHashAggregate(ClientContext &context, vector<Logi
       grouping_sets(std::move(grouping_sets_p)) {
 	// get a list of all aggregates to be computed
 	const idx_t group_count = groups_p.size();
+	std::cout << this->ToString();
+	for (u_long idxE = 0; idxE < expressions.size(); idxE++) {
+		std::cout << "Expr" << expressions[idxE]->ToString();
+	}
+	for (u_long idxE = 0; idxE < groups_p.size(); idxE++) {
+		std::cout << "Expr" << groups_p[idxE]->ToString();
+	}
+	std::cout << "group count" << group_count << "\n";
+	std::cout << "aggr count" << expressions.size() << "\n";
+	for (auto g : grouping_functions_p) {
+		for (auto c : g) {
+			std::cout << "Grouping function" << c << "\n";
+		}
+	}
+	for (auto g : grouping_sets_p) {
+		for (auto c : g) {
+			std::cout << "Grouping Set" << c << "\n";
+		}
+	}
 	if (grouping_sets.empty()) {
 		GroupingSet set;
 		for (idx_t i = 0; i < group_count; i++) {

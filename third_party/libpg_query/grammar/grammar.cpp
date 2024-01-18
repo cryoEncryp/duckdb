@@ -416,7 +416,7 @@ insertSelectOptions(PGSelectStmt *stmt,
 	}
 }
 
-static PGNode *
+static PGSelectStmt *
 makeSetOp(PGSetOperation op, bool all, PGNode *larg, PGNode *rarg)
 {
 	PGSelectStmt *n = makeNode(PGSelectStmt);
@@ -425,7 +425,7 @@ makeSetOp(PGSetOperation op, bool all, PGNode *larg, PGNode *rarg)
 	n->all = all;
 	n->larg = (PGSelectStmt *) larg;
 	n->rarg = (PGSelectStmt *) rarg;
-	return (PGNode *) n;
+	return (PGSelectStmt *) n;
 }
 
 /* SystemFuncName()

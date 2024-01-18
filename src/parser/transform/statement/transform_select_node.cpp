@@ -113,20 +113,34 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 	case duckdb_libpgquery::PG_SETOP_UNION:
 	case duckdb_libpgquery::PG_SETOP_EXCEPT:
 	case duckdb_libpgquery::PG_SETOP_INTERSECT:
-	case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME: {
+	case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME:
+	case duckdb_libpgquery::PG_SETOP_UNION_CORRESPONDING_BY: {
 		node = make_uniq<SetOperationNode>();
 		auto &result = node->Cast<SetOperationNode>();
 		if (stmt.withClause) {
 			TransformCTE(*PGPointerCast<duckdb_libpgquery::PGWithClause>(stmt.withClause), node->cte_map,
 			             materialized_ctes);
 		}
+		if (stmt.correspondingClause  != nullptr) {
+			auto modifier = make_uniq<DistinctModifier>();
+			// checks distinct on clause
+			auto target = PGPointerCast<duckdb_libpgquery::PGNode>(stmt.correspondingClause->head->data.ptr_value);
+			if (target) {
+				//  add the columns defined in the ON clause to the select list
+				TransformExpressionList(*stmt.correspondingClause, modifier->distinct_on_targets);
+			}
+			result.modifiers.push_back(std::move(modifier));
+		}
+
 		result.left = TransformSelectNode(*stmt.larg);
 		result.right = TransformSelectNode(*stmt.rarg);
 		if (!result.left || !result.right) {
 			throw Exception("Failed to transform setop children.");
 		}
 
-		result.setop_all = stmt.all;
+
+
+		result.setop_all = stmt.correspondingClause  != nullptr ? true : stmt.all;
 		switch (stmt.op) {
 		case duckdb_libpgquery::PG_SETOP_UNION:
 			result.setop_type = SetOperationType::UNION;
@@ -139,6 +153,9 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			break;
 		case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME:
 			result.setop_type = SetOperationType::UNION_BY_NAME;
+			break;
+		case duckdb_libpgquery::PG_SETOP_UNION_CORRESPONDING_BY:
+			result.setop_type = SetOperationType::UNION_CORRESPONDING_BY;
 			break;
 		default:
 			throw Exception("Unexpected setop type");

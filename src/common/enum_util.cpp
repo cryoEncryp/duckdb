@@ -2844,6 +2844,8 @@ const char* EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value) {
 		return "LOGICAL_EXCEPT";
 	case LogicalOperatorType::LOGICAL_INTERSECT:
 		return "LOGICAL_INTERSECT";
+	case LogicalOperatorType::LOGICAL_CORRESPONDING_BY:
+		return "LOGICAL_CORRESPONDING_BY";
 	case LogicalOperatorType::LOGICAL_RECURSIVE_CTE:
 		return "LOGICAL_RECURSIVE_CTE";
 	case LogicalOperatorType::LOGICAL_MATERIALIZED_CTE:
@@ -3005,6 +3007,9 @@ LogicalOperatorType EnumUtil::FromString<LogicalOperatorType>(const char *value)
 	}
 	if (StringUtil::Equals(value, "LOGICAL_INTERSECT")) {
 		return LogicalOperatorType::LOGICAL_INTERSECT;
+	}
+	if (StringUtil::Equals(value, "LOGICAL_CORRESPONDING_BY")) {
+		return LogicalOperatorType::LOGICAL_CORRESPONDING_BY;
 	}
 	if (StringUtil::Equals(value, "LOGICAL_RECURSIVE_CTE")) {
 		return LogicalOperatorType::LOGICAL_RECURSIVE_CTE;

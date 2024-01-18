@@ -241,7 +241,7 @@ unique_ptr<QueryNode> StatementGenerator::GenerateQueryNode() {
 		auto setop = make_uniq<SetOperationNode>();
 		GenerateCTEs(*setop);
 		setop->setop_type = Choose<SetOperationType>({SetOperationType::EXCEPT, SetOperationType::INTERSECT,
-		                                              SetOperationType::UNION, SetOperationType::UNION_BY_NAME});
+		                                              SetOperationType::UNION, SetOperationType::UNION_BY_NAME, SetOperationType::UNION_CORRESPONDING_BY});
 		setop->left = GenerateQueryNode();
 		setop->right = GenerateQueryNode();
 		switch (setop->setop_type) {

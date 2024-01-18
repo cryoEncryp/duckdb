@@ -113,8 +113,7 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 	case duckdb_libpgquery::PG_SETOP_UNION:
 	case duckdb_libpgquery::PG_SETOP_EXCEPT:
 	case duckdb_libpgquery::PG_SETOP_INTERSECT:
-	case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME:
-	case duckdb_libpgquery::PG_SETOP_UNION_CORRESPONDING_BY: {
+	case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME: {
 		node = make_uniq<SetOperationNode>();
 		auto &result = node->Cast<SetOperationNode>();
 		if (stmt.withClause) {
@@ -138,8 +137,6 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			throw Exception("Failed to transform setop children.");
 		}
 
-
-
 		result.setop_all = stmt.correspondingClause  != nullptr ? true : stmt.all;
 		switch (stmt.op) {
 		case duckdb_libpgquery::PG_SETOP_UNION:
@@ -153,9 +150,6 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			break;
 		case duckdb_libpgquery::PG_SETOP_UNION_BY_NAME:
 			result.setop_type = SetOperationType::UNION_BY_NAME;
-			break;
-		case duckdb_libpgquery::PG_SETOP_UNION_CORRESPONDING_BY:
-			result.setop_type = SetOperationType::UNION_CORRESPONDING_BY;
 			break;
 		default:
 			throw Exception("Unexpected setop type");

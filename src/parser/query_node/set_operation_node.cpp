@@ -23,9 +23,6 @@ string SetOperationNode::ToString() const {
 	case SetOperationType::INTERSECT:
 		result += setop_all ? "INTERSECT ALL" : "INTERSECT";
 		break;
-	case SetOperationType::UNION_CORRESPONDING_BY:
-	    result += "UNION CORRESPONDING BY";
-		break;
 	default:
 		throw InternalException("Unsupported set operation type");
 	}

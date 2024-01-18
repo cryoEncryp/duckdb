@@ -127,7 +127,6 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalOperator &
 	case LogicalOperatorType::LOGICAL_UNION:
 	case LogicalOperatorType::LOGICAL_EXCEPT:
 	case LogicalOperatorType::LOGICAL_INTERSECT:
-	case LogicalOperatorType::LOGICAL_CORRESPONDING_BY:
 		plan = CreatePlan(op.Cast<LogicalSetOperation>());
 		break;
 	case LogicalOperatorType::LOGICAL_INSERT:

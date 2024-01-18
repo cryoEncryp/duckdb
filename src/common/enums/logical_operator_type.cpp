@@ -60,8 +60,6 @@ string LogicalOperatorToString(LogicalOperatorType type) {
 		return "POSITIONAL_JOIN";
 	case LogicalOperatorType::LOGICAL_UNION:
 		return "UNION";
-	case LogicalOperatorType::LOGICAL_CORRESPONDING_BY:
-		return "CORRESPONDING_BY";
 	case LogicalOperatorType::LOGICAL_EXCEPT:
 		return "EXCEPT";
 	case LogicalOperatorType::LOGICAL_INTERSECT:

@@ -259,8 +259,8 @@ simple_select:
             | select_clause UNION corresponding_by select_clause
                 {
                     PGSelectStmt *n = makeNode(PGSelectStmt);
-                    n->op = PG_SETOP_UNION_CORRESPONDING_BY;
-                    n->targetList = makeNode(PGAStar);
+                    n->op = PG_SETOP_UNION;
+                    n->targetList = list_make1(makeNode(PGAStar));
                     n->larg = (PGSelectStmt *) $1;
                     n->rarg = (PGSelectStmt *) $4;
                     n->correspondingClause = $3;

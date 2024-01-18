@@ -498,7 +498,6 @@ unique_ptr<LogicalOperator> FlattenDependentJoins::PushDownDependentJoinInternal
 		}
 		return plan;
 	}
-	case LogicalOperatorType::LOGICAL_CORRESPONDING_BY:
 	case LogicalOperatorType::LOGICAL_EXCEPT:
 	case LogicalOperatorType::LOGICAL_INTERSECT:
 	case LogicalOperatorType::LOGICAL_UNION: {

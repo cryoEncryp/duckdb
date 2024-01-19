@@ -544,7 +544,7 @@ opt_table:	TABLE									{}
 		;
 
 all_or_distinct:
-			ALL										  { $$ = list_make1(NIL); }
+			ALL										  { $$ = NIL; }
 			| DISTINCT								  { $$ = list_make1(makeNode(PGAStar));}
             | DISTINCT ON '(' expr_list_opt_comma ')' { $$ = $4;}
 			| /*EMPTY*/								  { $$ = list_make1(makeNode(PGAStar)); }

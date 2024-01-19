@@ -24264,7 +24264,7 @@ yyreduce:
 
   case 578:
 #line 547 "third_party/libpg_query/grammar/statements/select.y"
-    { (yyval.list) = list_make1(NIL); ;}
+    { (yyval.list) = NIL; ;}
     break;
 
   case 579:

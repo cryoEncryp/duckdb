@@ -26,6 +26,22 @@ string SetOperationNode::ToString() const {
 	default:
 		throw InternalException("Unsupported set operation type");
 	}
+	for (idx_t modifier_idx = 0; modifier_idx < modifiers.size(); modifier_idx++) {
+		if (modifiers[modifier_idx]->type == ResultModifierType::DISTINCT_MODIFIER) {
+			auto &distinct_modifier = modifiers[modifier_idx]->Cast<DistinctModifier>();
+			result += " DISTINCT ";
+			if (!distinct_modifier.distinct_on_targets.empty()) {
+				result += "ON (";
+				for (idx_t k = 0; k < distinct_modifier.distinct_on_targets.size(); k++) {
+					if (k > 0) {
+						result += ", ";
+					}
+					result += distinct_modifier.distinct_on_targets[k]->ToString();
+				}
+				result += ") ";
+			}
+		}
+	}
 	result += " (" + right->ToString() + ")";
 	return result + ResultModifiersToString();
 }

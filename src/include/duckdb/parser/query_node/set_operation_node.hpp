@@ -31,8 +31,6 @@ public:
 	unique_ptr<QueryNode> left;
 	//! The right side of the set operation
 	unique_ptr<QueryNode> right;
-	//! lists
-	vector<unique_ptr<ParsedExpression>> corresponding_targets;
 
 	const vector<unique_ptr<ParsedExpression>> &GetSelectList() const override {
 		return left->GetSelectList();

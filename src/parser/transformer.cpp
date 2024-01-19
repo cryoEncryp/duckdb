@@ -7,6 +7,7 @@
 #include "duckdb/parser/query_node/cte_node.hpp"
 #include "duckdb/parser/parser_options.hpp"
 
+
 namespace duckdb {
 
 Transformer::Transformer(ParserOptions &options)
@@ -129,6 +130,7 @@ bool Transformer::GetParam(const string &identifier, idx_t &index, PreparedParam
 }
 
 unique_ptr<SQLStatement> Transformer::TransformStatementInternal(duckdb_libpgquery::PGNode &stmt) {
+
 	switch (stmt.type) {
 	case duckdb_libpgquery::T_PGRawStmt: {
 		auto &raw_stmt = PGCast<duckdb_libpgquery::PGRawStmt>(stmt);

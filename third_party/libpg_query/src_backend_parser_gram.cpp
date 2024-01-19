@@ -31203,7 +31203,7 @@ makeSetOp(PGSetOperation op, PGList *all, PGNode *larg, PGNode *rarg)
 		n->all = true;
 	} else {
 		if (lfirst(list_head(all)) && !IsA(lfirst(list_head(all)), PGAStar))
-			n->correspondingClause = all;
+			n->distinctClause = all;
 		n->all = false;
 	}
 	n->op = op;

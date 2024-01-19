@@ -6,7 +6,6 @@
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/transformer.hpp"
 #include "duckdb/parser/query_node/cte_node.hpp"
-#include "iostream"
 
 namespace duckdb {
 
@@ -121,14 +120,13 @@ unique_ptr<QueryNode> Transformer::TransformSelectInternal(duckdb_libpgquery::PG
 			TransformCTE(*PGPointerCast<duckdb_libpgquery::PGWithClause>(stmt.withClause), node->cte_map,
 			             materialized_ctes);
 		}
-		if (stmt.correspondingClause  != nullptr) {
-			std::cout << "call \n";
+		if (stmt.distinctClause  != nullptr) {
 			auto modifier = make_uniq<DistinctModifier>();
 			// checks distinct on clause
-			auto target = PGPointerCast<duckdb_libpgquery::PGNode>(stmt.correspondingClause->head->data.ptr_value);
+			auto target = PGPointerCast<duckdb_libpgquery::PGNode>(stmt.distinctClause->head->data.ptr_value);
 			if (target) {
 				//  add the columns defined in the ON clause to the select list
-				TransformExpressionList(*stmt.correspondingClause, modifier->distinct_on_targets);
+				TransformExpressionList(*stmt.distinctClause, modifier->distinct_on_targets);
 			}
 			result.modifiers.push_back(std::move(modifier));
 		}

@@ -426,8 +426,8 @@ idx_t GroupedAggregateHashTable::FindOrCreateGroupsInternal(DataChunk &groups, V
 
 			// Perform group comparisons
 			row_matcher.MatchColumns(state.group_chunk, chunk_state.vector_data, state.group_compare_vector,
-			                  		 need_compare_count, layout, addresses_v, &state.no_match_vector,
-			                         no_match_count, state.compared_columns);
+			                         need_compare_count, layout, addresses_v, &state.no_match_vector, no_match_count,
+			                         state.compared_columns);
 		}
 
 		// Linear probing: each of the entries that do not match move to the next entry in the HT
@@ -446,7 +446,8 @@ idx_t GroupedAggregateHashTable::FindOrCreateGroupsInternal(DataChunk &groups, V
 	return new_group_count;
 }
 
-idx_t GroupedAggregateHashTable::FindOrCreateGroupsWithKey(DataChunk &groups, Vector &addresses_out, SelectionVector &new_groups_out, vector<idx_t> key_columns) {
+idx_t GroupedAggregateHashTable::FindOrCreateGroupsWithKey(DataChunk &groups, Vector &addresses_out,
+                                                           SelectionVector &new_groups_out, vector<idx_t> key_columns) {
 	// Hashes only the columns that should be compared
 	Vector hashes(LogicalType::HASH);
 	groups.Hash(key_columns, hashes);
@@ -534,7 +535,8 @@ void GroupedAggregateHashTable::Combine(GroupedAggregateHashTable &other, vector
 	}
 }
 
-void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optional_ptr<atomic<double>> progress, vector<idx_t> column_idx) {
+void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optional_ptr<atomic<double>> progress,
+                                        vector<idx_t> column_idx) {
 	D_ASSERT(other_data.GetLayout().GetAggrWidth() == layout.GetAggrWidth());
 	D_ASSERT(other_data.GetLayout().GetDataWidth() == layout.GetDataWidth());
 	D_ASSERT(other_data.GetLayout().GetRowWidth() == layout.GetRowWidth());
@@ -569,7 +571,6 @@ void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optiona
 
 	Verify();
 }
-
 
 void GroupedAggregateHashTable::FetchAll(DataChunk &result) {
 	auto dummy_goups = SelectionVector(0, STANDARD_VECTOR_SIZE);

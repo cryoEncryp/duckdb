@@ -43,9 +43,6 @@ public:
 	idx_t Match(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs_formats, SelectionVector &sel, idx_t count,
 	            const TupleDataLayout &rhs_layout, Vector &rhs_row_locations, SelectionVector *no_match_sel,
 	            idx_t &no_match_count);
-	idx_t MatchColumns(DataChunk &lhs, const vector<TupleDataVectorFormat> &lhs_formats, SelectionVector &sel,
-	                   idx_t &count, const TupleDataLayout &rhs_layout, Vector &rhs_row_locations,
-	                   SelectionVector *no_match_sel, idx_t &no_match_count, vector<column_t> key_columns);
 
 private:
 	//! Gets the templated match function for a given column

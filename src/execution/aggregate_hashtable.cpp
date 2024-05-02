@@ -560,7 +560,7 @@ void GroupedAggregateHashTable::FetchAll(DataChunk &keys, DataChunk &payload) {
 		if (data_collection->Count() == 0) {
 			continue;
 		}
-		
+
 		// Initialise the scan state with the group indexes as the columns to scan
 		// which excludes the hash column
 		TupleDataScanState scan_state;

@@ -3,7 +3,6 @@
 #include "duckdb/execution/perfect_aggregate_hashtable.hpp"
 #include "duckdb/function/aggregate/distributive_functions.hpp"
 #include "duckdb/function/function_binder.hpp"
-#include "iostream"
 
 namespace duckdb {
 

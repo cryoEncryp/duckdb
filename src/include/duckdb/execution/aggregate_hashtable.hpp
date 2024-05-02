@@ -115,7 +115,6 @@ public:
 	void FetchAggregates(DataChunk &groups, DataChunk &result);
 
 	//! Fetch entries from the hash table into the result chunk
-	void FetchAll(DataChunk &result, TupleDataCollection &collection_p);
 	void FetchAll(DataChunk &result);
 
 	//! Finds or creates groups in the hashtable using the specified group keys. The addresses vector will be filled
@@ -140,10 +139,13 @@ public:
 	void SetRadixBits(idx_t radix_bits);
 	//! Initializes the PartitionedTupleData
 	void InitializePartitionedData();
+	//! Reset aggregate ht
+	void Reset();
 
 	//! Executes the filter(if any) and update the aggregates
 	void Combine(GroupedAggregateHashTable &other);
-	void Combine(TupleDataCollection &other_data, optional_ptr<atomic<double>> progress = nullptr);
+	void Combine(GroupedAggregateHashTable &other, vector<idx_t> column_idx);
+	void Combine(TupleDataCollection &other_data, optional_ptr<atomic<double>> progress = nullptr, vector<idx_t> column_idx = vector<idx_t>());
 
 	//! Unpins the data blocks
 	void UnpinData();

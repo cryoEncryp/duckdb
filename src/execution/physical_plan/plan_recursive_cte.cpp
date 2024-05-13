@@ -13,9 +13,11 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 
 	// Create the working_table that the PhysicalRecursiveCTE will use for evaluation.
 	auto working_table = make_shared_ptr<ColumnDataCollection>(context, op.types);
+	auto union_table = make_shared_ptr<ColumnDataCollection>(context, op.types);
 
 	// Add the ColumnDataCollection to the context of this PhysicalPlanGenerator
 	recursive_cte_tables[op.table_index] = working_table;
+	recursive_cte_tables[op.union_index] = union_table;
 
 	auto left = CreatePlan(*op.children[0]);
 	auto right = CreatePlan(*op.children[1]);
@@ -23,6 +25,7 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 	auto cte = make_uniq<PhysicalRecursiveCTE>(op.ctename, op.table_index, op.types, op.union_all, std::move(left),
 	                                           std::move(right), op.estimated_cardinality);
 	cte->working_table = working_table;
+	cte->union_table = union_table;
 
 	return std::move(cte);
 }

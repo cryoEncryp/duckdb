@@ -27,9 +27,11 @@ public:
 
 	string ctename;
 	idx_t table_index;
+	idx_t union_index;
 
 	bool union_all;
 	shared_ptr<ColumnDataCollection> working_table;
+	shared_ptr<ColumnDataCollection> union_table;
 	shared_ptr<MetaPipeline> recursive_meta_pipeline;
 
 public:

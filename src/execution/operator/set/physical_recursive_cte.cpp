@@ -75,6 +75,7 @@ SinkResultType PhysicalRecursiveCTE::Sink(ExecutionContext &context, DataChunk &
 	} else {
 		gstate.intermediate_table.Append(chunk);
 	}
+	union_table->Append(chunk);
 	return SinkResultType::NEED_MORE_INPUT;
 }
 

@@ -33,6 +33,7 @@ public:
 
 	//! Index used by the set operation
 	idx_t setop_index;
+	idx_t union_index;
 	//! The binder used by the left side of the set operation
 	shared_ptr<Binder> left_binder;
 	//! The binder used by the right side of the set operation

@@ -48,6 +48,7 @@ public:
 	bool finished_scan = false;
 	SelectionVector new_groups;
 	ClientContext& client_context;
+	idx_t iteration_count = 0;
 };
 
 unique_ptr<GlobalSinkState> PhysicalRecursiveCTE::GetGlobalSinkState(ClientContext &context) const {
@@ -109,8 +110,11 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 			working_table->Combine(gstate.intermediate_table);
 			BoxRendererConfig conf;
 			BoxRenderer renderer;
+			std::cout << "\n\n" << std::string(3, '%')
+			          << " Working table in iteration: " << ++gstate.iteration_count << "\n";
 			std::cout << renderer.ToString(gstate.client_context, col_names, *working_table);
 			getchar();
+
 			// and we clear the intermediate table
 			gstate.finished_scan = false;
 			gstate.intermediate_table.Reset();

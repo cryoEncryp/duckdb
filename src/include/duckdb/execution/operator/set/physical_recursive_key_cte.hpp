@@ -33,6 +33,8 @@ public:
 	// Contains the aggregates for the payload
 	vector<unique_ptr<BoundAggregateExpression>> payload_aggregates;
 
+	vector<string> col_names;
+
 public:
 	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const override;
 

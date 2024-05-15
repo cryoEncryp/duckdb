@@ -1,8 +1,10 @@
 #include "duckdb/execution/operator/set/physical_recursive_key_cte.hpp"
+#include "duckdb/common/box_renderer.hpp"
 #include "duckdb/execution/aggregate_hashtable.hpp"
 #include "duckdb/execution/perfect_aggregate_hashtable.hpp"
 #include "duckdb/function/aggregate/distributive_functions.hpp"
 #include "duckdb/function/function_binder.hpp"
+#include <iostream>
 
 namespace duckdb {
 
@@ -19,7 +21,7 @@ PhysicalRecursiveKeyCTE::~PhysicalRecursiveKeyCTE() {
 class RecursiveKeyCTEState : public GlobalSinkState {
 public:
 	explicit RecursiveKeyCTEState(ClientContext &context, const PhysicalRecursiveKeyCTE &op)
-	    : intermediate_table(context, op.GetTypes()), new_groups(STANDARD_VECTOR_SIZE) {
+	    : intermediate_table(context, op.GetTypes()), new_groups(STANDARD_VECTOR_SIZE), client_context(context) {
 
 		vector<BoundAggregateExpression *> payload_aggregates_ptr;
 		for (idx_t i = 0; i < op.payload_aggregates.size(); i++) {
@@ -39,6 +41,7 @@ public:
 	bool initialized = false;
 	bool finished_scan = false;
 	SelectionVector new_groups;
+	ClientContext& client_context;
 };
 
 unique_ptr<GlobalSinkState> PhysicalRecursiveKeyCTE::GetGlobalSinkState(ClientContext &context) const {
@@ -129,6 +132,11 @@ SourceResultType PhysicalRecursiveKeyCTE::GetData(ExecutionContext &context, Dat
 				PopulateChunk(result, distinct_rows, distinct_idx, false);
 				// Append the result to the recurring table.
 				recurring_table->Append(result);
+
+				BoxRendererConfig conf;
+				BoxRenderer renderer;
+				std::cout << renderer.ToString(gstate.client_context, col_names, *recurring_table);
+				getchar();
 			}
 
 			// filling working table

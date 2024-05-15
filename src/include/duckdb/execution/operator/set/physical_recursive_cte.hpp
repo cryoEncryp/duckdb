@@ -31,6 +31,7 @@ public:
 	bool union_all;
 	shared_ptr<ColumnDataCollection> working_table;
 	shared_ptr<MetaPipeline> recursive_meta_pipeline;
+	vector<string> col_names;
 
 public:
 	// Source interface

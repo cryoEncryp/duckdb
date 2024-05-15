@@ -34,6 +34,7 @@ public:
 	idx_t table_index;
 	idx_t column_count;
 	vector<CorrelatedColumnInfo> correlated_columns;
+	vector<string> col_names;
 
 public:
 	vector<ColumnBinding> GetColumnBindings() override {

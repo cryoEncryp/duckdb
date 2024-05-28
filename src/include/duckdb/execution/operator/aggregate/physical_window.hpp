@@ -10,6 +10,7 @@
 
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/parallel/pipeline.hpp"
+#include <iostream>
 
 namespace duckdb {
 
@@ -20,18 +21,20 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::WINDOW;
 
 public:
-	PhysicalWindow(vector<LogicalType> types, vector<unique_ptr<Expression>> select_list, idx_t estimated_cardinality,
-	               PhysicalOperatorType type = PhysicalOperatorType::WINDOW);
+	PhysicalWindow(vector<LogicalType> types, vector<unique_ptr<Expression>> select_list, idx_t estimated_cardinality, ClientContext& context, PhysicalOperatorType type = PhysicalOperatorType::WINDOW) ;
 
 	//! The projection list of the WINDOW statement (may contain aggregates)
 	vector<unique_ptr<Expression>> select_list;
+
 	//! The window expression with the order clause
 	idx_t order_idx;
 	//! Whether or not the window is order dependent (only true if ANY window function contains neither an order nor a
 	//! partition clause)
 	bool is_order_dependent;
+	ClientContext& client_context;
 
 public:
+	vector<string> names;
 	// Source interface
 	unique_ptr<LocalSourceState> GetLocalSourceState(ExecutionContext &context,
 	                                                 GlobalSourceState &gstate) const override;
@@ -61,6 +64,7 @@ public:
 
 	unique_ptr<LocalSinkState> GetLocalSinkState(ExecutionContext &context) const override;
 	unique_ptr<GlobalSinkState> GetGlobalSinkState(ClientContext &context) const override;
+
 
 	bool IsSink() const override {
 		return true;

@@ -596,7 +596,8 @@ struct SortedAggregateFunction {
 
 		DataChunk prefixed;
 		prefixed.Initialize(Allocator::DefaultAllocator(), global_sort->sort_layout.logical_types);
-
+		std::cout << "Preficxed \n";
+		prefixed.Print();
 		//	Go through the states accumulating values to sort until we hit the sort threshold
 		idx_t unsorted_count = 0;
 		idx_t sorted = 0;

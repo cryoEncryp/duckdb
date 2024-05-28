@@ -224,6 +224,7 @@ public:
 	static void NullaryScatterUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count,
 	                                 Vector &states, idx_t count) {
 		D_ASSERT(input_count == 0);
+		std::cout << "NullaryScatterUpdate \n";
 		AggregateExecutor::NullaryScatter<STATE, OP>(states, aggr_input_data, count);
 	}
 
@@ -231,6 +232,7 @@ public:
 	static void NullaryUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count, data_ptr_t state,
 	                          idx_t count) {
 		D_ASSERT(input_count == 0);
+		std::cout << "NullaryUpdate \n";
 		AggregateExecutor::NullaryUpdate<STATE, OP>(state, aggr_input_data, count);
 	}
 
@@ -238,6 +240,7 @@ public:
 	static void UnaryScatterUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count,
 	                               Vector &states, idx_t count) {
 		D_ASSERT(input_count == 1);
+		std::cout << "UnaryScatterUpdate \n";
 		AggregateExecutor::UnaryScatter<STATE, T, OP>(inputs[0], states, aggr_input_data, count);
 	}
 
@@ -245,6 +248,7 @@ public:
 	static void UnaryUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count, data_ptr_t state,
 	                        idx_t count) {
 		D_ASSERT(input_count == 1);
+		std::cout << "UnaryUpdate \n";
 		AggregateExecutor::UnaryUpdate<STATE, INPUT_TYPE, OP>(inputs[0], aggr_input_data, state, count);
 	}
 
@@ -254,6 +258,7 @@ public:
 	                        idx_t rid) {
 
 		D_ASSERT(partition.input_count == 1);
+		std::cout << "UnaryWindow \n";
 		AggregateExecutor::UnaryWindow<STATE, INPUT_TYPE, RESULT_TYPE, OP>(
 		    partition.inputs[0], partition.filter_mask, aggr_input_data, l_state, subframes, result, rid, g_state);
 	}
@@ -262,6 +267,7 @@ public:
 	static void BinaryScatterUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count,
 	                                Vector &states, idx_t count) {
 		D_ASSERT(input_count == 2);
+		std::cout << "BinaryScatterUpdate \n";
 		AggregateExecutor::BinaryScatter<STATE, A_TYPE, B_TYPE, OP>(aggr_input_data, inputs[0], inputs[1], states,
 		                                                            count);
 	}
@@ -270,6 +276,7 @@ public:
 	static void BinaryUpdate(Vector inputs[], AggregateInputData &aggr_input_data, idx_t input_count, data_ptr_t state,
 	                         idx_t count) {
 		D_ASSERT(input_count == 2);
+		std::cout << "BinaryUpdate \n";
 		AggregateExecutor::BinaryUpdate<STATE, A_TYPE, B_TYPE, OP>(aggr_input_data, inputs[0], inputs[1], state, count);
 	}
 

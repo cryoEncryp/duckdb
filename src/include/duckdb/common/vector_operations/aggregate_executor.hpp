@@ -12,7 +12,7 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/function/aggregate_state.hpp"
-
+#include "iostream"
 namespace duckdb {
 
 // structs
@@ -276,6 +276,8 @@ public:
 
 	template <class STATE_TYPE, class INPUT_TYPE, class OP>
 	static void UnaryUpdate(Vector &input, AggregateInputData &aggr_input_data, data_ptr_t state, idx_t count) {
+		std::cout << "test\n";
+		input.Print(9);
 		switch (input.GetVectorType()) {
 		case VectorType::CONSTANT_VECTOR: {
 			if (OP::IgnoreNull() && ConstantVector::IsNull(input)) {

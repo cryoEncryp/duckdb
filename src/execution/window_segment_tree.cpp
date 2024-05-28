@@ -60,7 +60,7 @@ WindowConstantAggregator::WindowConstantAggregator(AggregateObject aggr, const L
     : WindowAggregator(std::move(aggr), result_type, exclude_mode_p, count), partition(0), row(0), state(state_size),
       statep(Value::POINTER(CastPointerToValue(state.data()))),
       statef(Value::POINTER(CastPointerToValue(state.data()))) {
-
+	std::cout << "WindowConstantAggregator is build \n";
 	statef.SetVectorType(VectorType::FLAT_VECTOR); // Prevent conversion of results to constants
 
 	// Locate the partition boundaries
@@ -244,6 +244,8 @@ void WindowConstantAggregator::Evaluate(WindowAggregatorState &lstate, const Dat
 WindowCustomAggregator::WindowCustomAggregator(AggregateObject aggr, const LogicalType &result_type,
                                                const WindowExcludeMode exclude_mode_p, idx_t count)
     : WindowAggregator(std::move(aggr), result_type, exclude_mode_p, count) {
+	std::cout << "WindowCustomAggregator is build \n";
+
 }
 
 WindowCustomAggregator::~WindowCustomAggregator() {
@@ -303,7 +305,7 @@ void WindowCustomAggregator::Finalize(const FrameStats &stats) {
 	WindowAggregator::Finalize(stats);
 	partition_input =
 	    make_uniq<WindowPartitionInput>(inputs.data.data(), inputs.ColumnCount(), inputs.size(), filter_mask, stats);
-
+	std::cout << "Finalize WindowCústomAgg \n";
 	if (aggr.function.window_init) {
 		gstate = GetLocalState();
 		auto &gcstate = gstate->Cast<WindowCustomAggregatorState>();
@@ -320,18 +322,21 @@ unique_ptr<WindowAggregatorState> WindowCustomAggregator::GetLocalState() const 
 template <typename OP>
 static void EvaluateSubFrames(const DataChunk &bounds, const WindowExcludeMode exclude_mode, idx_t count, idx_t row_idx,
                               SubFrames &frames, OP operation) {
+	std::cout << "EvaluateSubFrames call \n";
 	auto begins = FlatVector::GetData<const idx_t>(bounds.data[WINDOW_BEGIN]);
 	auto ends = FlatVector::GetData<const idx_t>(bounds.data[WINDOW_END]);
 	auto peer_begin = FlatVector::GetData<const idx_t>(bounds.data[PEER_BEGIN]);
 	auto peer_end = FlatVector::GetData<const idx_t>(bounds.data[PEER_END]);
-
 	for (idx_t i = 0, cur_row = row_idx; i < count; ++i, ++cur_row) {
 		idx_t nframes = 0;
 		if (exclude_mode == WindowExcludeMode::NO_OTHER) {
+			std::cout << "EvaluateSubFrame NO_OTHER\n";
 			auto begin = begins[i];
 			auto end = ends[i];
 			frames[nframes++] = FrameBounds(begin, end);
 		} else {
+			std::cout << "EvaluateSubFrame OTHER\n";
+
 			//	The frame_exclusion option allows rows around the current row to be excluded from the frame,
 			//	even if they would be included according to the frame start and frame end options.
 			//	EXCLUDE CURRENT ROW excludes the current row from the frame.
@@ -376,6 +381,7 @@ static void EvaluateSubFrames(const DataChunk &bounds, const WindowExcludeMode e
 
 void WindowCustomAggregator::Evaluate(WindowAggregatorState &lstate, const DataChunk &bounds, Vector &result,
                                       idx_t count, idx_t row_idx) const {
+	std::cout << "WindowCustomAggregator::Evaluate \n";
 	auto &lcstate = lstate.Cast<WindowCustomAggregatorState>();
 	auto &frames = lcstate.frames;
 	const_data_ptr_t gstate_p = nullptr;
@@ -387,7 +393,11 @@ void WindowCustomAggregator::Evaluate(WindowAggregatorState &lstate, const DataC
 	EvaluateSubFrames(bounds, exclude_mode, count, row_idx, frames, [&](idx_t i) {
 		// Extract the range
 		AggregateInputData aggr_input_data(aggr.GetFunctionData(), lstate.allocator);
+		// std::cout << result.ToString(9) << "\n";
+		// aggr.function.window produce one new window result
+		std::cout << partition_input->count << "\n\n\n";
 		aggr.function.window(aggr_input_data, *partition_input, gstate_p, lcstate.state.data(), frames, result, i);
+		// std::cout << result.ToString(9) << "\n";
 	});
 }
 
@@ -397,6 +407,7 @@ void WindowCustomAggregator::Evaluate(WindowAggregatorState &lstate, const DataC
 WindowNaiveAggregator::WindowNaiveAggregator(AggregateObject aggr, const LogicalType &result_type,
                                              const WindowExcludeMode exclude_mode_p, idx_t partition_count)
     : WindowAggregator(std::move(aggr), result_type, exclude_mode_p, partition_count) {
+	std::cout << "WindowNaiveAggregator is build \n";
 }
 
 WindowNaiveAggregator::~WindowNaiveAggregator() {
@@ -539,6 +550,7 @@ bool WindowNaiveState::KeyEqual(const idx_t &lhs, const idx_t &rhs) {
 }
 
 void WindowNaiveState::Evaluate(const DataChunk &bounds, Vector &result, idx_t count, idx_t row_idx) {
+	std::cout << "WindowNaiveState::Evaluate \n";
 	auto &aggr = gstate.aggr;
 	auto &filter_mask = gstate.GetFilterMask();
 
@@ -600,6 +612,7 @@ void WindowNaiveAggregator::Evaluate(WindowAggregatorState &lstate, const DataCh
 WindowSegmentTree::WindowSegmentTree(AggregateObject aggr, const LogicalType &result_type, WindowAggregationMode mode_p,
                                      const WindowExcludeMode exclude_mode_p, idx_t count)
     : WindowAggregator(std::move(aggr), result_type, exclude_mode_p, count), internal_nodes(0), mode(mode_p) {
+	std::cout << "WindowSegmentTree is build \n";
 }
 
 void WindowSegmentTree::Finalize(const FrameStats &stats) {
@@ -882,15 +895,17 @@ void WindowSegmentTree::ConstructTree() {
 
 void WindowSegmentTree::Evaluate(WindowAggregatorState &lstate, const DataChunk &bounds, Vector &result, idx_t count,
                                  idx_t row_idx) const {
-
 	auto &ltstate = lstate.Cast<WindowSegmentTreeState>();
 	auto window_begin = FlatVector::GetData<const idx_t>(bounds.data[WINDOW_BEGIN]);
 	auto window_end = FlatVector::GetData<const idx_t>(bounds.data[WINDOW_END]);
 	auto peer_begin = FlatVector::GetData<const idx_t>(bounds.data[PEER_BEGIN]);
 	auto peer_end = FlatVector::GetData<const idx_t>(bounds.data[PEER_END]);
+	std::cout << result.ToString(9) << "\n";
 
 	auto &part = ltstate.part;
 	if (exclude_mode != WindowExcludeMode::NO_OTHER) {
+		std::cout << "WindowSegmentTree::Evaluate && not NO_OTHER" << "\n";
+
 		// 1. evaluate the tree left of the excluded part
 		part.Evaluate(*this, window_begin, peer_begin, result, count, row_idx, WindowSegmentTreePart::LEFT);
 
@@ -906,10 +921,11 @@ void WindowSegmentTree::Evaluate(WindowAggregatorState &lstate, const DataChunk 
 		// 4. combine the buffer state into the Segment Tree State
 		part.Combine(right_part, count);
 	} else {
+		std::cout << "WindowSegmentTree::Evaluate && NO_OTHER" << "\n";
 		part.Evaluate(*this, window_begin, window_end, result, count, row_idx, WindowSegmentTreePart::FULL);
 	}
-
 	part.Finalize(result, count);
+	std::cout << result.ToString(9) << "\n";
 }
 
 void WindowSegmentTreePart::Evaluate(const WindowSegmentTree &tree, const idx_t *begins, const idx_t *ends,
@@ -1092,6 +1108,7 @@ WindowDistinctAggregator::WindowDistinctAggregator(AggregateObject aggr, const L
                                                    ClientContext &context)
     : WindowAggregator(std::move(aggr), result_type, exclude_mode_p, count), context(context),
       allocator(Allocator::DefaultAllocator()) {
+	std::cout << "WindowDistinctAggregator is build \n";
 
 	payload_types.emplace_back(LogicalType::UBIGINT);
 	payload_chunk.Initialize(Allocator::DefaultAllocator(), payload_types);
@@ -1441,6 +1458,7 @@ void WindowDistinctState::FlushStates() {
 }
 
 void WindowDistinctState::Evaluate(const DataChunk &bounds, Vector &result, idx_t count, idx_t row_idx) {
+	std::cout << "WindowDistinctState \n";
 	auto fdata = FlatVector::GetData<data_ptr_t>(statef);
 	auto ldata = FlatVector::GetData<data_ptr_t>(statel);
 	auto pdata = FlatVector::GetData<data_ptr_t>(statep);

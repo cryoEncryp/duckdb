@@ -152,7 +152,7 @@ static void ListFinalize(Vector &states_vector, AggregateInputData &aggr_input_d
 
 static void ListCombineFunction(Vector &states_vector, Vector &combined, AggregateInputData &aggr_input_data,
                                 idx_t count) {
-
+	std::cout << "ListCombineFunction \n";
 	//	Can we use destructive combining?
 	if (aggr_input_data.combine_type == AggregateCombineType::ALLOW_DESTRUCTIVE) {
 		ListAbsorbFunction(states_vector, combined, aggr_input_data, count);
@@ -178,6 +178,7 @@ static void ListCombineFunction(Vector &states_vector, Vector &combined, Aggrega
 		RecursiveUnifiedVectorFormat input_data;
 		Vector::RecursiveToUnifiedFormat(input, entry_count, input_data);
 
+		input.Print();
 		for (idx_t entry_idx = 0; entry_idx < entry_count; ++entry_idx) {
 			aggr_input_data.allocator.AlignNext();
 			list_bind_data.functions.AppendRow(aggr_input_data.allocator, target.linked_list, input_data, entry_idx);

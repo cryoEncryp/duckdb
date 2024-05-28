@@ -1,5 +1,6 @@
 #include "duckdb/execution/window_executor.hpp"
 
+#include "duckdb/common/box_renderer.hpp"
 #include "duckdb/common/operator/add.hpp"
 #include "duckdb/common/operator/subtract.hpp"
 
@@ -636,6 +637,22 @@ WindowExecutorBoundsState::WindowExecutorBoundsState(BoundWindowExpression &wexp
 	bounds.Initialize(Allocator::Get(context), bounds_types);
 }
 
+void BToBox(DataChunk& input, ClientContext& context) {
+	// Set up collection to render in Box
+	ColumnDataCollection collection(Allocator::DefaultAllocator(), input.GetTypes());
+	collection.Append(input);
+
+	BoxRendererConfig conf;
+	BoxRenderer renderer;
+
+	vector<string> names;
+	for (auto t : input.GetTypes()) {
+		names.emplace_back("");
+	}
+	std::cout << "Window number \n";
+	std::cout << renderer.ToString(context, names, collection) << "\n";
+}
+
 void WindowExecutorBoundsState::UpdateBounds(idx_t row_idx, DataChunk &input_chunk, const WindowInputColumn &range) {
 	// Evaluate the row-level arguments
 	boundary_start.Execute(input_chunk);
@@ -644,6 +661,30 @@ void WindowExecutorBoundsState::UpdateBounds(idx_t row_idx, DataChunk &input_chu
 	const auto count = input_chunk.size();
 	bounds.Reset();
 	state.Bounds(bounds, row_idx, range, count, boundary_start, boundary_end, partition_mask, order_mask);
+
+	std::cout << bounds.ToString() << "\n";
+	DataChunk test;
+	test.Initialize(Allocator::DefaultAllocator(), input_chunk.GetTypes());
+	input_chunk.Copy(test);
+	UnifiedVectorFormat start;
+	bounds.data[WindowBounds::WINDOW_BEGIN].ToUnifiedFormat(bounds.size(), start);
+	UnifiedVectorFormat end;
+	bounds.data[WindowBounds::WINDOW_END].ToUnifiedFormat(bounds.size(), end);
+	for (idx_t k = 0; k < bounds.size(); k++) {
+		idx_t start_idx = start.owned_sel.get_index(k);
+		idx_t end_idx = end.owned_sel.get_index(k);
+
+		idx_t start_window = bounds.data[WindowBounds::WINDOW_BEGIN].GetValue(start_idx).GetValue<idx_t >();
+		idx_t end_window = bounds.data[WindowBounds::WINDOW_END].GetValue(end_idx).GetValue<idx_t >();
+
+		// idx_t start_idx = bounds.data[state.window_start].GetValue(k).GetValue<idx_t >();
+		// idx_t end_idx = bounds.data[state.window_end].GetValue(k).GetValue<idx_t >();
+		test.Slice(start_window, end_window - start_window);
+		test.Print();
+		test.Reset();
+		input_chunk.Copy(test);
+	}
+
 }
 
 //===--------------------------------------------------------------------===//
@@ -903,8 +944,9 @@ void WindowExecutor::Evaluate(idx_t row_idx, DataChunk &input_chunk, Vector &res
 	lbstate.UpdateBounds(row_idx, input_chunk, range);
 
 	const auto count = input_chunk.size();
+	// BToBox(input_chunk, context); // input_chunk contains all the rows
 	EvaluateInternal(lstate, result, count, row_idx);
-
+	// result.Print(9); // containing the result of the window functions
 	result.Verify(count);
 }
 
@@ -912,7 +954,7 @@ WindowAggregateExecutor::WindowAggregateExecutor(BoundWindowExpression &wexpr, C
                                                  const idx_t count, const ValidityMask &partition_mask,
                                                  const ValidityMask &order_mask, WindowAggregationMode mode)
     : WindowExecutor(wexpr, context, count, partition_mask, order_mask), mode(mode), filter_executor(context) {
-
+	std::cout << "Create WindowAggregateExecuter \n";
 	// Force naive for SEPARATE mode or for (currently!) unsupported functionality
 	const auto force_naive =
 	    !ClientConfig::GetConfig(context).enable_optimizer || mode == WindowAggregationMode::SEPARATE;
@@ -933,7 +975,7 @@ WindowAggregateExecutor::WindowAggregateExecutor(BoundWindowExpression &wexpr, C
 		// see http://www.vldb.org/pvldb/vol8/p1058-leis.pdf
 		aggregator = make_uniq<WindowSegmentTree>(aggr, wexpr.return_type, mode, wexpr.exclude_clause, count);
 	}
-
+	std::cout << "\n\n" << aggr.function.name << "\n";
 	// evaluate the FILTER clause and stuff it into a large mask for compactness and reuse
 	if (wexpr.filter_expr) {
 		filter_executor.AddExpression(*wexpr.filter_expr);
@@ -941,8 +983,26 @@ WindowAggregateExecutor::WindowAggregateExecutor(BoundWindowExpression &wexpr, C
 	}
 }
 
+void ToBox(DataChunk& input, ClientContext& context) {
+	// Set up collection to render in Box
+	ColumnDataCollection collection(Allocator::DefaultAllocator(), input.GetTypes());
+	collection.Append(input);
+
+	BoxRendererConfig conf;
+	BoxRenderer renderer;
+
+	vector<string> names;
+	for (auto t : input.GetTypes()) {
+		names.emplace_back("");
+	}
+	std::cout << "Window number \n";
+	std::cout << renderer.ToString(context, names, collection) << "\n";
+}
+
 void WindowAggregateExecutor::Sink(DataChunk &input_chunk, const idx_t input_idx, const idx_t total_count) {
 	// TODO we could evaluate those expressions in parallel
+
+	// ToBox(input_chunk, context); // input_chunk contains all the rows
 	idx_t filtered = 0;
 	SelectionVector *filtering = nullptr;
 	if (wexpr.filter_expr) {
@@ -961,7 +1021,9 @@ void WindowAggregateExecutor::Sink(DataChunk &input_chunk, const idx_t input_idx
 
 	D_ASSERT(aggregator);
 	aggregator->Sink(payload_chunk, filtering, filtered);
-
+	// BToBox(input_chunk, context); // Contains all rows and columns
+	// std::cout << input_idx << " idx\n"; // is 0
+	// std::cout << total_count << " totalcount \n"; // is 9
 	WindowExecutor::Sink(input_chunk, input_idx, total_count);
 }
 
@@ -1065,14 +1127,17 @@ unique_ptr<WindowExecutorState> WindowAggregateExecutor::GetExecutorState() cons
 	return std::move(res);
 }
 
+// The result will contains the window input after the evaluation of the aggregator
 void WindowAggregateExecutor::EvaluateInternal(WindowExecutorState &lstate, Vector &result, idx_t count,
                                                idx_t row_idx) const {
+	std::cout << "WindowAggregateExecutor EvaluateInternal was called \n";
 	auto &lastate = lstate.Cast<WindowAggregateState>();
 	D_ASSERT(aggregator);
 
 	auto &agg_state = *lastate.aggregator_state;
-
 	aggregator->Evaluate(agg_state, lastate.bounds, result, count, row_idx);
+	lastate.bounds.Print();
+	// result.Print(9); // Contains the result of Window
 }
 
 //===--------------------------------------------------------------------===//
@@ -1088,6 +1153,7 @@ void WindowRowNumberExecutor::EvaluateInternal(WindowExecutorState &lstate, Vect
                                                idx_t row_idx) const {
 	auto &lbstate = lstate.Cast<WindowExecutorBoundsState>();
 	auto partition_begin = FlatVector::GetData<const idx_t>(lbstate.bounds.data[PARTITION_BEGIN]);
+
 	auto rdata = FlatVector::GetData<int64_t>(result);
 	for (idx_t i = 0; i < count; ++i, ++row_idx) {
 		rdata[i] = NumericCast<int64_t>(row_idx - partition_begin[i] + 1);
@@ -1284,7 +1350,6 @@ WindowNtileExecutor::WindowNtileExecutor(BoundWindowExpression &wexpr, ClientCon
 void WindowValueExecutor::Sink(DataChunk &input_chunk, const idx_t input_idx, const idx_t total_count) {
 	// Single pass over the input to produce the global data.
 	// Vectorisation for the win...
-
 	// Set up a validity mask for IGNORE NULLS
 	bool check_nulls = false;
 	if (wexpr.ignore_nulls) {

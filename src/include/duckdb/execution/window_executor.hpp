@@ -13,6 +13,7 @@
 #include "duckdb/planner/expression/bound_window_expression.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 
+
 namespace duckdb {
 
 struct WindowInputExpression {
@@ -108,9 +109,8 @@ struct WindowInputColumn {
 	}
 
 	WindowInputExpression input_expr;
-
-private:
 	unique_ptr<Vector> target;
+private:
 	idx_t count;
 	idx_t capacity;
 };

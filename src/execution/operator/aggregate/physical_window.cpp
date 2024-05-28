@@ -1,5 +1,6 @@
 #include "duckdb/execution/operator/aggregate/physical_window.hpp"
 
+#include "duckdb/common/box_renderer.hpp"
 #include "duckdb/common/operator/add.hpp"
 #include "duckdb/common/operator/cast_operators.hpp"
 #include "duckdb/common/operator/comparison_operators.hpp"
@@ -8,7 +9,6 @@
 #include "duckdb/common/radix_partitioning.hpp"
 #include "duckdb/common/row_operations/row_operations.hpp"
 #include "duckdb/common/sort/partition_state.hpp"
-
 #include "duckdb/common/types/column/column_data_consumer.hpp"
 #include "duckdb/common/types/row/row_data_collection_scanner.hpp"
 #include "duckdb/common/uhugeint.hpp"
@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 
 namespace duckdb {
@@ -68,9 +69,9 @@ public:
 
 // this implements a sorted window functions variant
 PhysicalWindow::PhysicalWindow(vector<LogicalType> types, vector<unique_ptr<Expression>> select_list_p,
-                               idx_t estimated_cardinality, PhysicalOperatorType type)
+                               idx_t estimated_cardinality, ClientContext& context, PhysicalOperatorType type)
     : PhysicalOperator(type, std::move(types), estimated_cardinality), select_list(std::move(select_list_p)),
-      order_idx(0), is_order_dependent(false) {
+      order_idx(0), is_order_dependent(false), client_context(context) {
 
 	idx_t max_orders = 0;
 	for (idx_t i = 0; i < select_list.size(); ++i) {
@@ -121,13 +122,26 @@ static unique_ptr<WindowExecutor> WindowExecutorFactory(BoundWindowExpression &w
 		throw InternalException("Window aggregate type %s", ExpressionTypeToString(wexpr.type));
 	}
 }
+void B1ToBox(DataChunk& input, ClientContext& context) {
+	// Set up collection to render in Box
+	ColumnDataCollection collection(Allocator::DefaultAllocator(), input.GetTypes());
+	collection.Append(input);
 
+	BoxRendererConfig conf;
+	BoxRenderer renderer;
+
+	vector<string> names;
+	for (auto t : input.GetTypes()) {
+		names.emplace_back("");
+	}
+	std::cout << "Window number \n";
+	std::cout << renderer.ToString(context, names, collection) << "\n";
+}
 //===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//
 SinkResultType PhysicalWindow::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	auto &lstate = input.local_state.Cast<WindowLocalSinkState>();
-
 	lstate.Sink(chunk);
 
 	return SinkResultType::NEED_MORE_INPUT;
@@ -426,11 +440,13 @@ void WindowPartitionSourceState::BuildPartition(WindowGlobalSinkState &gstate, c
 	while (true) {
 		input_chunk.Reset();
 		scanner->Scan(input_chunk);
+		// BToBox(input_chunk, gstate.op.client_context);
 		if (input_chunk.size() == 0) {
 			break;
 		}
 
 		//	TODO: Parallelization opportunity
+		// nothing happened here with the window
 		for (auto &wexec : executors) {
 			wexec->Sink(input_chunk, input_idx, scanner->Count());
 		}
@@ -660,6 +676,8 @@ void WindowLocalSourceState::Scan(DataChunk &result) {
 	}
 	result.Verify();
 }
+
+
 
 unique_ptr<LocalSourceState> PhysicalWindow::GetLocalSourceState(ExecutionContext &context,
                                                                  GlobalSourceState &gsource_p) const {

@@ -52,11 +52,11 @@ int main() {
 	vector<duckdb::unique_ptr<Expression>> expressions;
 	expressions.push_back(std::move(sum));
 	// construct the window operator
-	auto window = make_uniq<PhysicalWindow>(result_types, std::move(expressions), 0);
 
 	// now we can run the window function
 	// first set up some contexts
 	auto &client_context = *con.context;
+	auto window = make_uniq<PhysicalWindow>(result_types, std::move(expressions), 0, client_context);
 	ThreadContext thread_context(client_context);
 	ExecutionContext econtext(client_context, thread_context);
 

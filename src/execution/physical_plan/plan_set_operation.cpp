@@ -64,12 +64,12 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalSetOperati
 			window_types.push_back(LogicalType::BIGINT);
 
 			auto window_left = make_uniq<PhysicalWindow>(window_types, CreatePartitionedRowNumExpression(types),
-			                                             left->estimated_cardinality);
+			                                             left->estimated_cardinality, context);
 			window_left->children.push_back(std::move(left));
 			left = std::move(window_left);
 
 			auto window_right = make_uniq<PhysicalWindow>(window_types, CreatePartitionedRowNumExpression(types),
-			                                              right->estimated_cardinality);
+			                                              right->estimated_cardinality, context);
 			window_right->children.push_back(std::move(right));
 			right = std::move(window_right);
 

@@ -144,8 +144,10 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalWindow &op
 		// Chain the new window operator on top of the plan
 		unique_ptr<PhysicalOperator> window;
 		if (i < blocking_count) {
-			window = make_uniq<PhysicalWindow>(types, std::move(select_list), op.estimated_cardinality);
+			std::cout << "Create Physical Window Operator \n";
+			window = make_uniq<PhysicalWindow>(types, std::move(select_list), op.estimated_cardinality, context, PhysicalOperatorType::WINDOW);
 		} else {
+			std::cout << "Create Physical Streaming Window Operator \n";
 			window = make_uniq<PhysicalStreamingWindow>(types, std::move(select_list), op.estimated_cardinality);
 		}
 		window->children.push_back(std::move(plan));

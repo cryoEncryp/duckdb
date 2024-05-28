@@ -92,7 +92,7 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::PlanAsOfJoin(LogicalComparis
 	auto &window_types = op.children[1]->types;
 	window_types.emplace_back(asof_type);
 
-	auto window = make_uniq<PhysicalWindow>(window_types, std::move(window_select), rhs_cardinality);
+	auto window = make_uniq<PhysicalWindow>(window_types, std::move(window_select), rhs_cardinality, context);
 	window->children.emplace_back(std::move(right));
 
 	// IEJoin(left, window, conditions || asof_comp ~op asof_end)

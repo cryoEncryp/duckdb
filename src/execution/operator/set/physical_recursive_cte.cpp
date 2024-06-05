@@ -109,7 +109,8 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 			working_table->Reset();
 			working_table->Combine(gstate.intermediate_table);
 			BoxRendererConfig conf;
-			BoxRenderer renderer;
+			conf.null_value = "▢";
+			BoxRenderer renderer(conf);
 			std::cout << "\n\n" << std::string(3, '%')
 			          << " Working table in iteration: " << ++gstate.iteration_count << "\n";
 			std::cout << renderer.ToString(gstate.client_context, col_names, *working_table);

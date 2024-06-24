@@ -11,7 +11,8 @@ string RecursiveCTENode::ToString() const {
 	if (union_all) {
 		result += " ALL ";
 	}
-	result += "(" + right->ToString() + ")";
+	// btodo: new mehtod to print trampoline
+	// result += "(" + right->ToString() + ")";
 	return result;
 }
 
@@ -30,9 +31,12 @@ bool RecursiveCTENode::Equals(const QueryNode *other_p) const {
 	if (!left->Equals(other.left.get())) {
 		return false;
 	}
-	if (!right->Equals(other.right.get())) {
-		return false;
-	}
+	// btodo: good way to compare branches with each other
+	/*
+		if (!right->Equals(other.right.get())) {
+			return false;
+		}
+	*/
 	return true;
 }
 
@@ -41,7 +45,9 @@ unique_ptr<QueryNode> RecursiveCTENode::Copy() const {
 	result->ctename = ctename;
 	result->union_all = union_all;
 	result->left = left->Copy();
-	result->right = right->Copy();
+	for (auto &branch : trampolines) {
+		result->trampolines.emplace_back(branch->Copy());
+	}
 	result->aliases = aliases;
 	this->CopyProperties(*result);
 	return std::move(result);

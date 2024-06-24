@@ -60,14 +60,18 @@ void Transformer::TransformCTE(duckdb_libpgquery::PGWithClause &de_with_clause, 
 			throw NotImplementedException("CTE collations not supported");
 		}
 		// we need a query
-		if (!cte.ctequery || cte.ctequery->type != duckdb_libpgquery::T_PGSelectStmt) {
+		if (!cte.ctetrampolines && (!cte.ctequery || cte.ctequery->type != duckdb_libpgquery::T_PGSelectStmt)) {
 			throw NotImplementedException("A CTE needs a SELECT");
 		}
 
 		// CTE transformation can either result in inlining for non recursive CTEs, or in recursive CTE bindings
 		// otherwise.
 		if (cte.cterecursive || de_with_clause.recursive) {
-			info->query = TransformRecursiveCTE(cte, *info);
+			if (cte.ctetrampolines) {
+				info->query = TransformTrampolineCTE(cte, *info);
+			} else {
+				info->query = TransformRecursiveCTE(cte, *info);
+			}
 		} else {
 			Transformer cte_transformer(*this);
 			info->query =
@@ -109,7 +113,8 @@ unique_ptr<SelectStatement> Transformer::TransformRecursiveCTE(duckdb_libpgquery
 		result.ctename = string(cte.ctename);
 		result.union_all = stmt.all;
 		result.left = TransformSelectNode(*PGPointerCast<duckdb_libpgquery::PGSelectStmt>(stmt.larg));
-		result.right = TransformSelectNode(*PGPointerCast<duckdb_libpgquery::PGSelectStmt>(stmt.rarg));
+		result.trampolines.emplace_back(
+		    TransformSelectNode(*PGPointerCast<duckdb_libpgquery::PGSelectStmt>(stmt.rarg)));
 		result.aliases = info.aliases;
 		if (stmt.op != duckdb_libpgquery::PG_SETOP_UNION) {
 			throw ParserException("Unsupported setop type for recursive CTE: only UNION or UNION ALL are supported");
@@ -130,4 +135,29 @@ unique_ptr<SelectStatement> Transformer::TransformRecursiveCTE(duckdb_libpgquery
 	return select;
 }
 
+unique_ptr<SelectStatement> Transformer::TransformTrampolineCTE(duckdb_libpgquery::PGCommonTableExpr &cte,
+                                                                CommonTableExpressionInfo &info) {
+	// btodo: add more security like in TransformRecursiveCTE
+	unique_ptr<SelectStatement> select;
+	// Transforming the incomming CTE into a SelectStatement
+	select = make_uniq<SelectStatement>();
+	select->node = make_uniq_base<QueryNode, RecursiveCTENode>();
+	auto &result = select->node->Cast<RecursiveCTENode>();
+
+	for (auto branch = cte.ctetrampolines->head; branch != nullptr; branch = branch->next) {
+		if (!result.left) {
+			result.ctename = string(cte.ctename);
+			result.union_all = false;
+			result.left = TransformSelectNode(*PGPointerCast<duckdb_libpgquery::PGSelectStmt>(branch->data.ptr_value));
+			result.aliases = info.aliases;
+		} else {
+			result.trampolines.emplace_back(
+			    TransformSelectNode(*PGPointerCast<duckdb_libpgquery::PGSelectStmt>(branch->data.ptr_value)));
+		}
+	}
+
+	// There should be n-1 branches one is set into the left
+	D_ASSERT(result.trampolines.size() == cte.ctetrampolines->length - 1);
+	return select;
+}
 } // namespace duckdb

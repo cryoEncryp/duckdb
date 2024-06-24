@@ -63,8 +63,8 @@ void RecursiveCTENode::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(200, "cte_name", ctename);
 	serializer.WritePropertyWithDefault<bool>(201, "union_all", union_all, false);
 	serializer.WritePropertyWithDefault<unique_ptr<QueryNode>>(202, "left", left);
-	serializer.WritePropertyWithDefault<unique_ptr<QueryNode>>(203, "right", right);
-	serializer.WritePropertyWithDefault<vector<string>>(204, "aliases", aliases);
+	serializer.WritePropertyWithDefault<vector<string>>(203, "aliases", aliases);
+	serializer.WritePropertyWithDefault<vector<unique_ptr<QueryNode>>>(204, "trampolines", trampolines);
 }
 
 unique_ptr<QueryNode> RecursiveCTENode::Deserialize(Deserializer &deserializer) {
@@ -72,8 +72,8 @@ unique_ptr<QueryNode> RecursiveCTENode::Deserialize(Deserializer &deserializer) 
 	deserializer.ReadPropertyWithDefault<string>(200, "cte_name", result->ctename);
 	deserializer.ReadPropertyWithDefault<bool>(201, "union_all", result->union_all, false);
 	deserializer.ReadPropertyWithDefault<unique_ptr<QueryNode>>(202, "left", result->left);
-	deserializer.ReadPropertyWithDefault<unique_ptr<QueryNode>>(203, "right", result->right);
-	deserializer.ReadPropertyWithDefault<vector<string>>(204, "aliases", result->aliases);
+	deserializer.ReadPropertyWithDefault<vector<string>>(203, "aliases", result->aliases);
+	deserializer.ReadPropertyWithDefault<vector<unique_ptr<QueryNode>>>(204, "trampolines", result->trampolines);
 	return std::move(result);
 }
 

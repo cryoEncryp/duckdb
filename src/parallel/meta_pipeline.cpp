@@ -67,8 +67,9 @@ void MetaPipeline::AssignNextBatchIndex(Pipeline &pipeline) {
 }
 
 void MetaPipeline::Build(PhysicalOperator &op) {
-	D_ASSERT(pipelines.size() == 1);
-	D_ASSERT(children.empty());
+	// btodo: What should be done here?
+	// D_ASSERT(pipelines.size() == 1);
+	// D_ASSERT(children.empty());
 	op.BuildPipelines(*pipelines.back(), *this);
 }
 

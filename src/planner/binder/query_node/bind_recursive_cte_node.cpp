@@ -14,7 +14,7 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 	// first recursively visit the recursive CTE operations
 	// the left side is visited first and is added to the BindContext of the right side
 	D_ASSERT(statement.left);
-	D_ASSERT(statement.right);
+	D_ASSERT(statement.trampolines.size() >= 1);
 
 	result->ctename = statement.ctename;
 	result->union_all = statement.union_all;
@@ -34,24 +34,34 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 	// This allows the right side to reference the CTE recursively
 	bind_context.AddGenericBinding(result->setop_index, statement.ctename, result->names, result->types);
 
-	result->right_binder = Binder::CreateBinder(context, this);
+	// Binding all branches
+	for (size_t child_index = 0; child_index < statement.trampolines.size(); child_index++) {
+		auto binder = Binder::CreateBinder(context, this);
+		// Add bindings of left side to temporary CTE bindings context
+		binder->bind_context.AddCTEBinding(result->setop_index, statement.ctename, result->names, result->types);
+		result->trampolines.emplace_back(binder->BindNode(*statement.trampolines[child_index]));
+		result->trampoline_binder.emplace_back(binder);
+	}
 
-	// Add bindings of left side to temporary CTE bindings context
-	result->right_binder->bind_context.AddCTEBinding(result->setop_index, statement.ctename, result->names,
-	                                                 result->types);
-	result->right = result->right_binder->BindNode(*statement.right);
+	// OPTIMIZE: How are we processing correlation
 	for (auto &c : result->left_binder->correlated_columns) {
-		result->right_binder->AddCorrelatedColumn(c);
+		for (auto &branch_binder : result->trampoline_binder) {
+			branch_binder->AddCorrelatedColumn(c);
+		}
 	}
 
 	// move the correlated expressions from the child binders to this binder
 	MoveCorrelatedExpressions(*result->left_binder);
-	MoveCorrelatedExpressions(*result->right_binder);
+	for (auto &branch_binder : result->trampoline_binder) {
+		MoveCorrelatedExpressions(*branch_binder);
+	}
 
 	// now both sides have been bound we can resolve types
-	if (result->left->types.size() != result->right->types.size()) {
-		throw BinderException("Set operations can only apply to expressions with the "
-		                      "same number of result columns");
+	for (auto &branch : result->trampolines) {
+		if (result->left->types.size() != branch->types.size()) {
+			throw BinderException("Set operations can only apply to expressions with the "
+			                      "same number of result columns");
+		}
 	}
 
 	if (!statement.modifiers.empty()) {

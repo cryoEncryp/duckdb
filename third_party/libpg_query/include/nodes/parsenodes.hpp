@@ -1100,6 +1100,7 @@ typedef struct PGCommonTableExpr {
 	PGList *ctecoltypes;      /* OID list of output column type OIDs */
 	PGList *ctecoltypmods;    /* integer list of output column typmods */
 	PGList *ctecolcollations; /* OID list of column collation OIDs */
+	PGList *ctetrampolines;
 } PGCommonTableExpr;
 
 /* Convenience macro to get the output tlist of a CTE's query */

@@ -168,7 +168,13 @@ void BoundNodeVisitor::VisitBoundQueryNode(BoundQueryNode &node) {
 	case QueryNodeType::RECURSIVE_CTE_NODE: {
 		auto &cte_node = node.Cast<BoundRecursiveCTENode>();
 		VisitBoundQueryNode(*cte_node.left);
-		VisitBoundQueryNode(*cte_node.right);
+		if (cte_node.right) {
+			VisitBoundQueryNode(*cte_node.right);
+		} else {
+			for (auto &branch : cte_node.trampolines) {
+				VisitBoundQueryNode(*branch);
+			}
+		}
 		break;
 	}
 	case QueryNodeType::CTE_NODE: {

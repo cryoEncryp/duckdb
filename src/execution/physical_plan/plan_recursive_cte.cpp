@@ -1,6 +1,6 @@
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/execution/operator/scan/physical_column_data_scan.hpp"
-#include "duckdb/execution/operator/set/physical_recursive_cte.hpp"
+#include "duckdb/execution/operator/set/physical_trampoline.hpp"
 #include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "duckdb/planner/operator/logical_cteref.hpp"
@@ -9,7 +9,6 @@
 namespace duckdb {
 
 unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveCTE &op) {
-	D_ASSERT(op.children.size() == 2);
 
 	// Create the working_table that the PhysicalRecursiveCTE will use for evaluation.
 	auto working_table = make_shared_ptr<ColumnDataCollection>(context, op.types);
@@ -17,11 +16,13 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 	// Add the ColumnDataCollection to the context of this PhysicalPlanGenerator
 	recursive_cte_tables[op.table_index] = working_table;
 
-	auto left = CreatePlan(*op.children[0]);
-	auto right = CreatePlan(*op.children[1]);
+	vector<unique_ptr<PhysicalOperator>> branches;
+	for (auto &branch : op.children) {
+		branches.emplace_back(CreatePlan(*branch));
+	}
 
-	auto cte = make_uniq<PhysicalRecursiveCTE>(op.ctename, op.table_index, op.types, op.union_all, std::move(left),
-	                                           std::move(right), op.estimated_cardinality);
+	auto cte = make_uniq<PhysicalTrampoline>(op.ctename, op.table_index, op.types, op.union_all, std::move(branches[0]),
+	                                         std::move(branches[1]), std::move(branches), op.estimated_cardinality);
 	cte->working_table = working_table;
 
 	return std::move(cte);

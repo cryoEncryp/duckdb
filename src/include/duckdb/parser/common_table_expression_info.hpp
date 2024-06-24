@@ -19,7 +19,7 @@ struct CommonTableExpressionInfo {
 	vector<string> aliases;
 	unique_ptr<SelectStatement> query;
 	CTEMaterialize materialized = CTEMaterialize::CTE_MATERIALIZE_DEFAULT;
-
+	vector<unique_ptr<SelectStatement>> trampoline_queries;
 	void Serialize(Serializer &serializer) const;
 	static unique_ptr<CommonTableExpressionInfo> Deserialize(Deserializer &deserializer);
 	unique_ptr<CommonTableExpressionInfo> Copy();

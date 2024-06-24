@@ -27,7 +27,7 @@ public:
 	//! The left side of the set operation
 	unique_ptr<QueryNode> left;
 	//! The right side of the set operation
-	unique_ptr<QueryNode> right;
+	vector<unique_ptr<QueryNode>> trampolines;
 	//! Aliases of the recursive CTE node
 	vector<string> aliases;
 

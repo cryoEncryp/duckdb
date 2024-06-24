@@ -31,12 +31,15 @@ public:
 	//! The right side of the set operation
 	unique_ptr<BoundQueryNode> right;
 
+	vector<unique_ptr<BoundQueryNode>> trampolines;
+
 	//! Index used by the set operation
 	idx_t setop_index;
 	//! The binder used by the left side of the set operation
 	shared_ptr<Binder> left_binder;
 	//! The binder used by the right side of the set operation
 	shared_ptr<Binder> right_binder;
+	vector<shared_ptr<Binder>> trampoline_binder;
 
 public:
 	idx_t GetRootIndex() override {

@@ -257,7 +257,9 @@ void ParsedExpressionIterator::EnumerateQueryNodeChildren(
 	case QueryNodeType::RECURSIVE_CTE_NODE: {
 		auto &rcte_node = node.Cast<RecursiveCTENode>();
 		EnumerateQueryNodeChildren(*rcte_node.left, callback);
-		EnumerateQueryNodeChildren(*rcte_node.right, callback);
+		for (auto &branch : rcte_node.trampolines) {
+			EnumerateQueryNodeChildren(*branch, callback);
+		}
 		break;
 	}
 	case QueryNodeType::CTE_NODE: {

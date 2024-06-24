@@ -456,7 +456,17 @@ cte_list:
 		| cte_list ',' common_table_expr		{ $$ = lappend($1, $3); }
 		;
 
-common_table_expr:  name opt_name_list AS opt_materialized '(' PreparableStmt ')'
+common_table_expr: TRAMPOLINE name opt_name_list AS opt_materialized '(' branch_list ')'
+			{
+				PGCommonTableExpr *n = makeNode(PGCommonTableExpr);
+				n->ctename = $2;
+				n->aliascolnames = $3;
+				n->ctematerialized = $5;
+				n->ctetrampolines = $7;
+				n->location = @1;
+				$$ = (PGNode *) n;
+			}
+			| name opt_name_list AS opt_materialized '(' PreparableStmt ')'
 			{
 				PGCommonTableExpr *n = makeNode(PGCommonTableExpr);
 				n->ctename = $1;
@@ -466,6 +476,11 @@ common_table_expr:  name opt_name_list AS opt_materialized '(' PreparableStmt ')
 				n->location = @1;
 				$$ = (PGNode *) n;
 			}
+		;
+
+branch_list:
+		SelectStmt 							{ $$ = list_make1($1); }
+		| branch_list JUMP SelectStmt 	{ $$ = lappend($1, $3); }
 		;
 
 opt_materialized:

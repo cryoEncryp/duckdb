@@ -55,7 +55,6 @@
 #include "duckdb/main/materialized_query_result.hpp"
 #include "duckdb/main/stream_query_result.hpp"
 #include "duckdb/main/relation/materialized_relation.hpp"
-#include "duckdb/main/relation/query_relation.hpp"
 
 #include <random>
 
@@ -421,46 +420,11 @@ void DuckDBPyConnection::Initialize(py::handle &m) {
 	DuckDBPyConnection::ImportCache();
 }
 
-shared_ptr<DuckDBPyConnection> DuckDBPyConnection::ExecuteMany(const py::object &query, py::object params_p) {
-	result.reset();
-	if (params_p.is_none()) {
-		params_p = py::list();
+shared_ptr<DuckDBPyConnection> DuckDBPyConnection::ExecuteMany(const py::object &query, py::object params) {
+	if (params.is_none()) {
+		params = py::list();
 	}
-
-	auto statements = GetStatements(query);
-	if (statements.empty()) {
-		// TODO: should we throw?
-		return nullptr;
-	}
-
-	auto last_statement = std::move(statements.back());
-	statements.pop_back();
-	// First immediately execute any preceding statements (if any)
-	// FIXME: DBAPI says to not accept an 'executemany' call with multiple statements
-	ExecuteImmediately(std::move(statements));
-
-	auto prep = PrepareQuery(std::move(last_statement));
-
-	if (!py::isinstance<py::list>(params_p)) {
-		throw InvalidInputException("executemany requires a list of parameter sets to be provided");
-	}
-	auto outer_list = py::list(params_p);
-	if (outer_list.empty()) {
-		throw InvalidInputException("executemany requires a non-empty list of parameter sets to be provided");
-	}
-
-	unique_ptr<QueryResult> query_result;
-	// Execute once for every set of parameters that are provided
-	for (auto &parameters : outer_list) {
-		auto params = py::reinterpret_borrow<py::object>(parameters);
-		query_result = ExecuteInternal(*prep, std::move(params));
-	}
-	// Set the internal 'result' object
-	if (query_result) {
-		auto py_result = make_uniq<DuckDBPyResult>(std::move(query_result));
-		result = make_uniq<DuckDBPyRelation>(std::move(py_result));
-	}
-
+	Execute(query, std::move(params), true);
 	return shared_from_this();
 }
 
@@ -522,65 +486,99 @@ py::list TransformNamedParameters(const case_insensitive_map_t<idx_t> &named_par
 	return new_params;
 }
 
-case_insensitive_map_t<Value> TransformPreparedParameters(PreparedStatement &prep, const py::object &params) {
-	case_insensitive_map_t<Value> named_values;
-	if (py::isinstance<py::list>(params) || py::isinstance<py::tuple>(params)) {
-		if (prep.n_param != py::len(params)) {
-			throw InvalidInputException("Prepared statement needs %d parameters, %d given", prep.n_param,
-			                            py::len(params));
-		}
-		auto unnamed_values = DuckDBPyConnection::TransformPythonParamList(params);
-		for (idx_t i = 0; i < unnamed_values.size(); i++) {
-			auto &value = unnamed_values[i];
-			auto identifier = std::to_string(i + 1);
-			named_values[identifier] = std::move(value);
-		}
-	} else if (py::isinstance<py::dict>(params)) {
-		auto dict = py::cast<py::dict>(params);
-		named_values = DuckDBPyConnection::TransformPythonParamDict(dict);
-	} else {
-		throw InvalidInputException("Prepared parameters can only be passed as a list or a dictionary");
-	}
-	return named_values;
-}
-
-unique_ptr<PreparedStatement> DuckDBPyConnection::PrepareQuery(unique_ptr<SQLStatement> statement) {
-	unique_ptr<PreparedStatement> prep;
-	{
-		py::gil_scoped_release release;
-		unique_lock<mutex> lock(py_connection_lock);
-
-		prep = connection->Prepare(std::move(statement));
-		if (prep->HasError()) {
-			prep->error.Throw();
-		}
-	}
-	return prep;
-}
-
-unique_ptr<QueryResult> DuckDBPyConnection::ExecuteInternal(PreparedStatement &prep, py::object params) {
+unique_ptr<QueryResult> DuckDBPyConnection::ExecuteInternal(vector<unique_ptr<SQLStatement>> statements,
+                                                            py::object params, bool many) {
 	if (!connection) {
 		throw ConnectionException("Connection has already been closed");
 	}
 	if (params.is_none()) {
 		params = py::list();
 	}
-
-	// Execute the prepared statement with the prepared parameters
-	auto named_values = TransformPreparedParameters(prep, params);
-	unique_ptr<QueryResult> res;
+	result = nullptr;
+	unique_ptr<PreparedStatement> prep;
 	{
 		py::gil_scoped_release release;
 		unique_lock<std::mutex> lock(py_connection_lock);
 
-		auto pending_query = prep.PendingQuery(named_values);
-		res = CompletePendingQuery(*pending_query);
+		if (statements.empty()) {
+			// no statements to execute
+			return nullptr;
+		}
+		// if there are multiple statements, we directly execute the statements besides the last one
+		// we only return the result of the last statement to the user, unless one of the previous statements fails
+		for (idx_t i = 0; i + 1 < statements.size(); i++) {
+			if (statements[i]->n_param != 0) {
+				throw NotImplementedException(
+				    "Prepared parameters are only supported for the last statement, please split your query up into "
+				    "separate 'execute' calls if you want to use prepared parameters");
+			}
+			auto pending_query = connection->PendingQuery(std::move(statements[i]), false);
+			auto res = CompletePendingQuery(*pending_query);
 
-		if (res->HasError()) {
-			res->ThrowError();
+			if (res->HasError()) {
+				res->ThrowError();
+			}
+		}
+
+		prep = connection->Prepare(std::move(statements.back()));
+		if (prep->HasError()) {
+			prep->error.Throw();
 		}
 	}
-	return res;
+
+	// this is a list of a list of parameters in executemany
+	py::list params_set;
+	if (!many) {
+		params_set = py::list(1);
+		params_set[0] = params;
+	} else {
+		if (!py::isinstance<py::list>(params)) {
+			throw InvalidInputException("executemany requires a list of parameter sets to be provided");
+		}
+		auto outer_list = py::list(params);
+		if (outer_list.empty()) {
+			throw InvalidInputException("executemany requires a non-empty list of parameter sets to be provided");
+		}
+		params_set = params;
+	}
+
+	// For every entry of the argument list, execute the prepared statement with said arguments
+	for (pybind11::handle single_query_params : params_set) {
+		case_insensitive_map_t<Value> named_values;
+		if (py::isinstance<py::list>(single_query_params) || py::isinstance<py::tuple>(single_query_params)) {
+			if (prep->n_param != py::len(single_query_params)) {
+				throw InvalidInputException("Prepared statement needs %d parameters, %d given", prep->n_param,
+				                            py::len(single_query_params));
+			}
+			auto unnamed_values = DuckDBPyConnection::TransformPythonParamList(single_query_params);
+			for (idx_t i = 0; i < unnamed_values.size(); i++) {
+				auto &value = unnamed_values[i];
+				auto identifier = std::to_string(i + 1);
+				named_values[identifier] = std::move(value);
+			}
+		} else if (py::isinstance<py::dict>(single_query_params)) {
+			auto dict = py::cast<py::dict>(single_query_params);
+			named_values = DuckDBPyConnection::TransformPythonParamDict(dict);
+		} else {
+			throw InvalidInputException("Prepared parameters can only be passed as a list or a dictionary");
+		}
+		unique_ptr<QueryResult> res;
+		{
+			py::gil_scoped_release release;
+			unique_lock<std::mutex> lock(py_connection_lock);
+			auto pending_query = prep->PendingQuery(named_values);
+			res = CompletePendingQuery(*pending_query);
+
+			if (res->HasError()) {
+				res->ThrowError();
+			}
+		}
+
+		if (!many) {
+			return res;
+		}
+	}
+	return nullptr;
 }
 
 vector<unique_ptr<SQLStatement>> DuckDBPyConnection::GetStatements(const py::object &query) {
@@ -605,25 +603,10 @@ shared_ptr<DuckDBPyConnection> DuckDBPyConnection::ExecuteFromString(const strin
 	return Execute(py::str(query));
 }
 
-shared_ptr<DuckDBPyConnection> DuckDBPyConnection::Execute(const py::object &query, py::object params) {
-	result.reset();
-
+shared_ptr<DuckDBPyConnection> DuckDBPyConnection::Execute(const py::object &query, py::object params, bool many) {
 	auto statements = GetStatements(query);
-	if (statements.empty()) {
-		// TODO: should we throw?
-		return nullptr;
-	}
 
-	auto last_statement = std::move(statements.back());
-	statements.pop_back();
-	// First immediately execute any preceding statements (if any)
-	// FIXME: SQLites implementation says to not accept an 'execute' call with multiple statements
-	ExecuteImmediately(std::move(statements));
-
-	auto prep = PrepareQuery(std::move(last_statement));
-	auto res = ExecuteInternal(*prep, std::move(params));
-
-	// Set the internal 'result' object
+	auto res = ExecuteInternal(std::move(statements), std::move(params), many);
 	if (res) {
 		auto py_result = make_uniq<DuckDBPyResult>(std::move(res));
 		result = make_uniq<DuckDBPyRelation>(std::move(py_result));
@@ -1039,26 +1022,8 @@ unique_ptr<DuckDBPyRelation> DuckDBPyConnection::ReadCSV(
 	return make_uniq<DuckDBPyRelation>(read_csv_p->Alias(read_csv.alias));
 }
 
-void DuckDBPyConnection::ExecuteImmediately(vector<unique_ptr<SQLStatement>> statements) {
-	if (statements.empty()) {
-		return;
-	}
-	for (auto &stmt : statements) {
-		if (stmt->n_param != 0) {
-			throw NotImplementedException(
-			    "Prepared parameters are only supported for the last statement, please split your query up into "
-			    "separate 'execute' calls if you want to use prepared parameters");
-		}
-		auto pending_query = connection->PendingQuery(std::move(stmt), false);
-		auto res = CompletePendingQuery(*pending_query);
-
-		if (res->HasError()) {
-			res->ThrowError();
-		}
-	}
-}
-
-unique_ptr<DuckDBPyRelation> DuckDBPyConnection::RunQuery(const py::object &query, string alias, py::object params) {
+unique_ptr<DuckDBPyRelation> DuckDBPyConnection::RunQuery(const py::object &query, string alias,
+                                                          const py::object &params) {
 	if (!connection) {
 		throw ConnectionException("Connection has already been closed");
 	}
@@ -1067,51 +1032,25 @@ unique_ptr<DuckDBPyRelation> DuckDBPyConnection::RunQuery(const py::object &quer
 	}
 
 	auto statements = GetStatements(query);
-	if (statements.empty()) {
-		// TODO: should we throw?
+	if (statements.size() == 1 && statements[0]->type == StatementType::SELECT_STATEMENT && py::none().is(params)) {
+		auto select_statement = unique_ptr_cast<SQLStatement, SelectStatement>(std::move(statements[0]));
+		return make_uniq<DuckDBPyRelation>(connection->RelationFromQuery(std::move(select_statement), alias));
+	}
+
+	auto res = ExecuteInternal(std::move(statements), params);
+	if (!res) {
 		return nullptr;
 	}
-
-	auto last_statement = std::move(statements.back());
-	statements.pop_back();
-	// First immediately execute any preceding statements (if any)
-	ExecuteImmediately(std::move(statements));
-
-	// Attempt to create a Relation for lazy execution if possible
-	shared_ptr<Relation> relation;
-	if (py::none().is(params)) {
-		// FIXME: currently we can't create relations with prepared parameters
-		auto statement_type = last_statement->type;
-		switch (statement_type) {
-		case StatementType::SELECT_STATEMENT: {
-			auto select_statement = unique_ptr_cast<SQLStatement, SelectStatement>(std::move(last_statement));
-			relation = connection->RelationFromQuery(std::move(select_statement), alias);
-			break;
-		}
-		default:
-			break;
-		}
+	if (res->properties.return_type != StatementReturnType::QUERY_RESULT) {
+		return nullptr;
 	}
-
-	if (!relation) {
-		// Could not create a relation, resort to direct execution
-		auto prep = PrepareQuery(std::move(last_statement));
-		auto res = ExecuteInternal(*prep, std::move(params));
-		if (!res) {
-			return nullptr;
-		}
-		if (res->properties.return_type != StatementReturnType::QUERY_RESULT) {
-			return nullptr;
-		}
-		if (res->type == QueryResultType::STREAM_RESULT) {
-			auto &stream_result = res->Cast<StreamQueryResult>();
-			res = stream_result.Materialize();
-		}
-		auto &materialized_result = res->Cast<MaterializedQueryResult>();
-		relation = make_shared_ptr<MaterializedRelation>(connection->context, materialized_result.TakeCollection(),
-		                                                 res->names, alias);
+	if (res->type == QueryResultType::STREAM_RESULT) {
+		auto &stream_result = res->Cast<StreamQueryResult>();
+		res = stream_result.Materialize();
 	}
-	return make_uniq<DuckDBPyRelation>(std::move(relation));
+	auto &materialized_result = res->Cast<MaterializedQueryResult>();
+	return make_uniq<DuckDBPyRelation>(
+	    make_uniq<MaterializedRelation>(connection->context, materialized_result.TakeCollection(), res->names, alias));
 }
 
 unique_ptr<DuckDBPyRelation> DuckDBPyConnection::Table(const string &tname) {
@@ -1583,9 +1522,6 @@ shared_ptr<DuckDBPyConnection> DuckDBPyConnection::Connect(const string &databas
 	config.AddExtensionOption("pandas_analyze_sample",
 	                          "The maximum number of rows to sample when analyzing a pandas object column.",
 	                          LogicalType::UBIGINT, Value::UBIGINT(1000));
-	config.AddExtensionOption("python_enable_replacements",
-	                          "Whether variables visible to the current stack should be used for replacement scans.",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	if (!DuckDBPyConnection::IsJupyter()) {
 		config_dict["duckdb_api"] = Value("python");
 	} else {

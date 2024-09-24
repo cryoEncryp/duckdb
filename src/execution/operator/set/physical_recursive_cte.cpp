@@ -10,6 +10,7 @@
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
+#include "iostream"
 
 #include <utility>
 
@@ -250,6 +251,8 @@ void PhysicalRecursiveCTE::ExecuteRecursivePipelines(ExecutionContext &context) 
 			break;
 		}
 	}
+	auto &gstate = sink_state->Cast<RecursiveCTEState>();
+	std::cout << "## Row Count: " << gstate.ht->Count() << std::endl;
 }
 
 //===--------------------------------------------------------------------===//

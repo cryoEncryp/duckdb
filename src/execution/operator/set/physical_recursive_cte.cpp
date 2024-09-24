@@ -10,6 +10,8 @@
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
+#include "duckdb/common/box_renderer.hpp"
+#include "iostream"
 
 #include <utility>
 
@@ -33,7 +35,7 @@ PhysicalRecursiveCTE::~PhysicalRecursiveCTE() {
 class RecursiveCTEState : public GlobalSinkState {
 public:
 	explicit RecursiveCTEState(ClientContext &context, const PhysicalRecursiveCTE &op)
-	    : intermediate_table(context, op.GetTypes()), new_groups(STANDARD_VECTOR_SIZE) {
+	    : intermediate_table(context, op.GetTypes()), new_groups(STANDARD_VECTOR_SIZE), client_context(context) {
 
 		vector<BoundAggregateExpression *> payload_aggregates_ptr;
 		for (idx_t i = 0; i < op.payload_aggregates.size(); i++) {
@@ -54,6 +56,8 @@ public:
 	bool initialized = false;
 	bool finished_scan = false;
 	SelectionVector new_groups;
+	ClientContext& client_context;
+	int count = 0;
 };
 
 unique_ptr<GlobalSinkState> PhysicalRecursiveCTE::GetGlobalSinkState(ClientContext &context) const {
@@ -176,6 +180,11 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 					// Append the result to the recurring table.
 					recurring_table->Append(result);
 				}
+				BoxRendererConfig conf;
+				BoxRenderer renderer;
+				std::cout << "### iteration " << gstate.count++ << " ###" << std::endl;
+				std::cout << renderer.ToString(gstate.client_context, col_names, *recurring_table);
+				getchar();
 			}
 
 			working_table->Reset();

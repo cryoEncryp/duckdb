@@ -23,9 +23,9 @@ public:
 public:
 	LogicalRecursiveCTE(string ctename_p, idx_t table_index, idx_t recurring_index, idx_t column_count, bool union_all,
 	                    vector<unique_ptr<Expression>> key_targets, unique_ptr<LogicalOperator> top,
-	                    unique_ptr<LogicalOperator> bottom)
+	                    unique_ptr<LogicalOperator> bottom, vector<string> col_names)
 	    : LogicalOperator(LogicalOperatorType::LOGICAL_RECURSIVE_CTE), union_all(union_all),
-	      ctename(std::move(ctename_p)), table_index(table_index), recurring_index(recurring_index),
+	      ctename(std::move(ctename_p)), col_names(std::move(col_names)), table_index(table_index), recurring_index(recurring_index),
 	      column_count(column_count), key_targets(std::move(key_targets)) {
 
 		children.push_back(std::move(top));
@@ -34,6 +34,7 @@ public:
 
 	bool union_all;
 	string ctename;
+	vector<string> col_names;
 	idx_t table_index;
 	idx_t recurring_index;
 	idx_t column_count;

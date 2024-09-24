@@ -96,6 +96,7 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 		cte->distinct_types = distinct_types;
 		cte->payload_idx = payload_idx;
 		cte->payload_types = payload_types;
+		cte->col_names = std::move(op.col_names);
 
 		cte->working_table = working_table;
 		cte->recurring_table = recurring_table;

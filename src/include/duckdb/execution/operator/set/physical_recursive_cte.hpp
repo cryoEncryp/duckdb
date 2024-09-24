@@ -45,6 +45,8 @@ public:
 	vector<idx_t> payload_idx, distinct_idx;
 	// Contains the aggregates for the payload
 	vector<unique_ptr<BoundAggregateExpression>> payload_aggregates;
+	// Contains the column names of the payload
+	vector<string> col_names;
 
 public:
 	// Source interface

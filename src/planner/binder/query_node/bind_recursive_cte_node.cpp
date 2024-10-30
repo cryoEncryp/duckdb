@@ -38,22 +38,26 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 
 	// Binding all branches
 	for (size_t child_index = 0; child_index < statement.trampolines.size(); child_index++) {
+		// create a new binder for each branch
 		auto binder = Binder::CreateBinder(context, this);
 
 		binder->bind_context.AddCTEBinding(result->setop_index, statement.ctename, result->names, result->types);
 
+		auto& branch = statement.trampolines[child_index];
+		auto& select_node = branch->Cast<SelectNode>();
+
+		auto c1 = make_uniq<ConstantExpression>(Value::UBIGINT(child_index+1));
 		// Create a comparison expression for first column
-		auto c1 = make_uniq<ConstantExpression>(Value::UBIGINT(1));
-		auto c2 = make_uniq<ConstantExpression>(Value::UBIGINT(2));
 		unique_ptr<ParsedExpression> expr =
-			make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(c1), std::move(c2));
+			make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(c1), select_node.select_list[0]->Copy());
 
 		// Bind predicate
-		ExpressionBinder expr_binder(*binder, context);
-		auto bound_expr = expr_binder.Bind(expr, nullptr);
+
 
 		// Add bindings of left side to temporary CTE bindings context
 		auto node = binder->BindNode(*statement.trampolines[child_index]);
+		ExpressionBinder expr_binder(*binder, context);
+		auto bound_expr = expr_binder.Bind(expr, nullptr);
 		auto& select = node->Cast<BoundSelectNode>();
 		select.where_clause = std::move(bound_expr);
 		result->trampolines.emplace_back(std::move(node));

@@ -8,6 +8,7 @@
 
 #include "duckdb/parser/expression/constant_expression.hpp"
 #include "duckdb/parser/expression/comparison_expression.hpp"
+#include "duckdb/parser/expression/conjunction_expression.hpp"
 namespace duckdb {
 
 unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
@@ -49,15 +50,14 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 		auto c1 = make_uniq<ConstantExpression>(Value::UBIGINT(child_index+1));
 		// Create a comparison expression for first column
 		unique_ptr<ParsedExpression> expr =
-			make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(c1), select_node.select_list[0]->Copy());
+			make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(c1), make_uniq<ColumnRefExpression>(StringValue::Get(result->names[0])));
 
-		// Bind predicate
-
+		unique_ptr<ParsedExpression> expr2 = make_uniq<ConjunctionExpression>(ExpressionType::CONJUNCTION_AND, std::move(expr), std::move(select_node.where_clause));
 
 		// Add bindings of left side to temporary CTE bindings context
 		auto node = binder->BindNode(*statement.trampolines[child_index]);
 		ExpressionBinder expr_binder(*binder, context);
-		auto bound_expr = expr_binder.Bind(expr, nullptr);
+		auto bound_expr = expr_binder.Bind(expr2, nullptr);
 		auto& select = node->Cast<BoundSelectNode>();
 		select.where_clause = std::move(bound_expr);
 		result->trampolines.emplace_back(std::move(node));

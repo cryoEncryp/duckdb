@@ -41,6 +41,8 @@ public:
 	bool union_all;
 	string ctename;
 	idx_t table_index;
+	// BTODO: This should be in a seperate class
+	vector<idx_t> table_indices;
 	idx_t column_count;
 	vector<CorrelatedColumnInfo> correlated_columns;
 

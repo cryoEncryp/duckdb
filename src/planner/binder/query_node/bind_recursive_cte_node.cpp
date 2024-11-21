@@ -23,6 +23,11 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 	result->union_all = statement.union_all;
 	result->setop_index = GenerateTableIndex();
 
+	// Create a table index for each trampoline branch.
+	for (size_t i = 0; i < statement.trampolines.size(); i++) {
+		result->table_indices.push_back(GenerateTableIndex());
+	}
+
 	result->left_binder = Binder::CreateBinder(context, this);
 	result->left = result->left_binder->BindNode(*statement.left);
 
@@ -39,28 +44,13 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 
 	// Binding all branches
 	for (size_t child_index = 0; child_index < statement.trampolines.size(); child_index++) {
-		// create a new binder for each branch
+		// Create a new binder for each branch.
 		auto binder = Binder::CreateBinder(context, this);
 
-		binder->bind_context.AddCTEBinding(result->setop_index, statement.ctename, result->names, result->types);
+		// Create a binding of the recurisive CTE name to different table indexes.
+		binder->bind_context.AddCTEBinding(result->table_indices[child_index], statement.ctename, result->names, result->types);
 
-		auto& branch = statement.trampolines[child_index];
-		auto& select_node = branch->Cast<SelectNode>();
-
-		auto c1 = make_uniq<ConstantExpression>(Value::UBIGINT(child_index+1));
-		// Create a comparison expression for first column
-		unique_ptr<ParsedExpression> expr =
-			make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL, std::move(c1), make_uniq<ColumnRefExpression>(StringValue::Get(result->names[0])));
-
-		unique_ptr<ParsedExpression> expr2 = make_uniq<ConjunctionExpression>(ExpressionType::CONJUNCTION_AND, std::move(expr), std::move(select_node.where_clause));
-
-		// Add bindings of left side to temporary CTE bindings context
-		auto node = binder->BindNode(*statement.trampolines[child_index]);
-		ExpressionBinder expr_binder(*binder, context);
-		auto bound_expr = expr_binder.Bind(expr2, nullptr);
-		auto& select = node->Cast<BoundSelectNode>();
-		select.where_clause = std::move(bound_expr);
-		result->trampolines.emplace_back(std::move(node));
+		result->trampolines.emplace_back(binder->BindNode(*statement.trampolines[child_index]));
 		result->trampoline_binder.emplace_back(binder);
 	}
 

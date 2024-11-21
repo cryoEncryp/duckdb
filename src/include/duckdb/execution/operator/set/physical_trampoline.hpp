@@ -4,9 +4,12 @@
 
 namespace duckdb {
 
+class TrampolineCTEState;
+
 class PhysicalTrampoline : public PhysicalRecursiveCTE {
 public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::RECURSIVE_CTE;
+	vector<shared_ptr<ColumnDataCollection>> working_tables;
 
 	bool ParallelSink() const override {
 		return false;
@@ -18,7 +21,9 @@ public:
 	                   vector<unique_ptr<PhysicalOperator>> children, idx_t estimated_cardinality);
 
 	void BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) override;
+
 	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const override;
+	unique_ptr<GlobalSinkState> GetGlobalSinkState(ClientContext &context) const override;
 
 	// Sink interface
 	SinkResultType Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const override;

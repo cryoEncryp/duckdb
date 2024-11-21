@@ -1,0 +1,94 @@
+# name: test/sql/cte/trampoline.test
+# description:
+# group: [cte]
+
+statement ok
+CREATE TABLE step1 (row_id      integer, definitions integer);
+
+statement ok
+INSERT INTO step1 SELECT * FROM (VALUES (21, NULL), (22, 1), (23, 2), (24, 3), (25, 4), (26, 4), (27, 4), (28, 5), (29, NULL), (30, NULL));
+
+query II
+WITH RECURSIVE TRAMPOLINE q(label, row_id, match_start) AS (
+    SELECT 1 AS label, s.row_id, row_id AS match_start
+    FROM   step1 AS s
+    WHERE  s.definitions = 1
+        JUMP
+    SELECT CASE s.definitions WHEN 2 THEN 1 WHEN 3 THEN 2 END AS label, s.row_id, t.match_start
+    FROM   q AS t
+    JOIN   step1      AS s ON t.row_id + 1 = s.row_id
+    WHERE  (s.definitions = 2 OR s.definitions = 3)
+        JUMP
+    SELECT CASE s.definitions WHEN 4 THEN 2 WHEN 5 THEN 0 END AS label, s.row_id, t.match_start
+    FROM   q AS t
+    JOIN   step1      AS s ON t.row_id + 1 = s.row_id
+    WHERE  (s.definitions = 4 OR s.definitions = 5)
+)
+SELECT q.match_start, q.row_id AS match_end
+FROM q;
+----
+22	28
+
+query I
+WITH RECURSIVE TRAMPOLINE tbl(branch, todo, value) AS (
+	select 1 as branch, 6 as todo, 1 as value
+			JUMP
+	select case when todo = 1 then 0 else 2 end, todo-1, value * todo from tbl
+			JUMP
+	select case when todo = 1 then 0 else 1 end, todo-1, value * todo from tbl
+)
+SELECT value
+FROM tbl;
+----
+720
+
+#####################################################
+# ERROR
+# error weil der branch 1 nicht das trampoline referenziert
+# und deswegen jede iteration ausgeführt wird
+#query II
+#WITH RECURSIVE TRAMPOLINE t(branch, x, y) AS (
+#	SELECT 2 AS branch, 0 AS x, 10 AS y
+#		JUMP
+#	SELECT 2 AS branch, 1 AS x, 10 AS y
+#		JUMP
+#	SELECT CASE WHEN run.x > run.y
+#                 THEN 0
+#                 ELSE 2
+#               END AS branch, run.x + 2 AS x, run.y + 1 AS y
+#        FROM   t AS run
+#) SELECT t.x, t.y
+#FROM t;
+#----
+
+24	22
+
+query I
+WITH RECURSIVE TRAMPOLINE t(c,r) as (
+	select * from (values(1,0),(1,0),(2,0)) v
+		JUMP
+	select 2,0 from t
+		JUMP
+	select 0, count(*) from (select c+r as s from t) where s<10
+)
+SELECT r
+FROM t
+ORDER BY r;
+----
+1
+2
+
+query I
+WITH RECURSIVE TRAMPOLINE t(c,r) AS (
+	select * from (values(1,0),(1,0),(2,0)) v
+		JUMP
+	select 3,0 from t
+		JUMP
+	select 3,0 from t
+		JUMP
+	select 0,count(*) from t
+) SELECT r
+FROM t;
+----
+1
+2

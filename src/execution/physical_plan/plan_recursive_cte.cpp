@@ -10,22 +10,41 @@ namespace duckdb {
 
 unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveCTE &op) {
 
-	// Create the working_table that the PhysicalRecursiveCTE will use for evaluation.
-	auto working_table = make_shared_ptr<ColumnDataCollection>(context, op.types);
+	// BTODO: Syntax for WITH RECURSIVE is not yet working.
+	if (op.table_indices.size() == 0) {
+		// Create the working_table that the PhysicalRecursiveCTE will use for evaluation.
+		auto working_table = make_shared_ptr<ColumnDataCollection>(context, op.types);
 
-	// Add the ColumnDataCollection to the context of this PhysicalPlanGenerator
-	recursive_cte_tables[op.table_index] = working_table;
+		recursive_cte_tables[op.table_index] = working_table;
+		auto left = CreatePlan(*op.children[0]);
 
-	vector<unique_ptr<PhysicalOperator>> branches;
-	for (auto &branch : op.children) {
-		branches.emplace_back(CreatePlan(*branch));
+		auto right = CreatePlan(*op.children[1]);
+
+		auto cte = make_uniq<PhysicalRecursiveCTE>(op.ctename, op.table_index, op.types, op.union_all, std::move(left),
+													std::move(right), op.estimated_cardinality);
+
+		cte->working_table = working_table;
+		return std::move(cte);
+	} else {
+		// Create a working table for each branch that is not the seed branch and register them.
+		vector<shared_ptr<ColumnDataCollection>> working_tables;
+		for (idx_t branch_idx = 0; branch_idx < op.table_indices.size(); branch_idx++) {
+			working_tables.push_back(make_shared_ptr<ColumnDataCollection>(context, op.types));
+			recursive_cte_tables[op.table_indices[branch_idx]] = working_tables[branch_idx];
+		}
+
+		// Create a plan for each branch.
+		vector<unique_ptr<PhysicalOperator>> branches;
+		for (idx_t branch_idx = 0; branch_idx < op.children.size(); branch_idx++) {
+			branches.emplace_back(CreatePlan(*op.children[branch_idx]));
+		}
+
+		// BTODO: Constructor with only seed and branches
+		auto cte = make_uniq<PhysicalTrampoline>(op.ctename, op.table_index, op.types, op.union_all, std::move(branches[0]),
+												std::move(branches[1]), std::move(branches), op.estimated_cardinality);
+		cte->working_tables = std::move(working_tables);
+		return std::move(cte);
 	}
-
-	auto cte = make_uniq<PhysicalTrampoline>(op.ctename, op.table_index, op.types, op.union_all, std::move(branches[0]),
-	                                         std::move(branches[1]), std::move(branches), op.estimated_cardinality);
-	cte->working_table = working_table;
-
-	return std::move(cte);
 }
 
 unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalCTERef &op) {

@@ -203,7 +203,7 @@ void PhysicalRecursiveCTE::BuildPipelines(Pipeline &current, MetaPipeline &meta_
 	recursive_meta_pipeline = make_shared_ptr<MetaPipeline>(executor, state, this);
 	vector<const_reference<PhysicalOperator>> ops;
 	recursive_meta_pipeline->SetRecursiveCTE();
-	for (int child_idx = 1; child_idx < children.size(); child_idx++) {
+	for (idx_t child_idx = 1; child_idx < children.size(); child_idx++) {
 		recursive_meta_pipeline->Build(*children[1]);
 		GatherColumnDataScans(*children[1], ops);
 	}

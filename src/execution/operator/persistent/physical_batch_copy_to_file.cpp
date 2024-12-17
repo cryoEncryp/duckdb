@@ -143,7 +143,7 @@ public:
 	FixedBatchCopyState current_task = FixedBatchCopyState::SINKING_DATA;
 
 	void InitializeCollection(ClientContext &context, const PhysicalOperator &op) {
-		collection = make_uniq<ColumnDataCollection>(context, op.children[0]->types, ColumnDataAllocatorType::HYBRID);
+		collection = make_uniq<ColumnDataCollection>(BufferAllocator::Get(context), op.children[0]->types);
 		collection->InitializeAppend(append_state);
 		local_memory_usage = 0;
 	}
@@ -163,12 +163,11 @@ SinkResultType PhysicalBatchCopyToFile::Sink(ExecutionContext &context, DataChun
 		FlushBatchData(context.client, gstate);
 
 		if (!memory_manager.IsMinimumBatchIndex(batch_index) && memory_manager.OutOfMemory(batch_index)) {
-			lock_guard<mutex> l(memory_manager.GetBlockedTaskLock());
+			auto guard = memory_manager.Lock();
 			if (!memory_manager.IsMinimumBatchIndex(batch_index)) {
 				// no tasks to process, we are not the minimum batch index and we have no memory available to buffer
 				// block the task for now
-				memory_manager.BlockTask(input.interrupt_state);
-				return SinkResultType::BLOCKED;
+				return memory_manager.BlockSink(guard, input.interrupt_state);
 			}
 		}
 		state.current_task = FixedBatchCopyState::SINKING_DATA;
@@ -435,7 +434,7 @@ void PhysicalBatchCopyToFile::RepartitionBatches(ClientContext &context, GlobalS
 				// the collection is too large for a batch - we need to repartition
 				// create an empty collection
 				auto new_collection =
-				    make_uniq<ColumnDataCollection>(context, children[0]->types, ColumnDataAllocatorType::HYBRID);
+				    make_uniq<ColumnDataCollection>(BufferAllocator::Get(context), children[0]->types);
 				append_batch = make_uniq<FixedRawBatchData>(0U, std::move(new_collection));
 			}
 			if (append_batch) {
@@ -459,8 +458,7 @@ void PhysicalBatchCopyToFile::RepartitionBatches(ClientContext &context, GlobalS
 			// the collection is full - move it to the result and create a new one
 			task_manager.AddTask(make_uniq<PrepareBatchTask>(gstate.scheduled_batch_index++, std::move(append_batch)));
 
-			auto new_collection =
-			    make_uniq<ColumnDataCollection>(context, children[0]->types, ColumnDataAllocatorType::HYBRID);
+			auto new_collection = make_uniq<ColumnDataCollection>(BufferAllocator::Get(context), children[0]->types);
 			append_batch = make_uniq<FixedRawBatchData>(0U, std::move(new_collection));
 			append_batch->collection->InitializeAppend(append_state);
 		}
@@ -556,7 +554,11 @@ void PhysicalBatchCopyToFile::AddLocalBatch(ClientContext &context, GlobalSinkSt
 	// attempt to repartition to our desired batch size
 	RepartitionBatches(context, gstate, min_batch_index);
 	// unblock tasks so they can help process batches (if any are blocked)
-	auto any_unblocked = memory_manager.UnblockTasks();
+	bool any_unblocked;
+	{
+		auto guard = memory_manager.Lock();
+		any_unblocked = memory_manager.UnblockTasks(guard);
+	}
 	// if any threads were unblocked they can pick up execution of the tasks
 	// otherwise we will execute a task and flush here
 	if (!any_unblocked) {

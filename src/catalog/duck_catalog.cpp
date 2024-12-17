@@ -8,15 +8,13 @@
 #include "duckdb/function/built_in_functions.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/transaction/duck_transaction_manager.hpp"
-#ifndef DISABLE_CORE_FUNCTIONS_EXTENSION
-#include "duckdb/core_functions/core_functions.hpp"
-#endif
+#include "duckdb/function/function_list.hpp"
 
 namespace duckdb {
 
 DuckCatalog::DuckCatalog(AttachedDatabase &db)
     : Catalog(db), dependency_manager(make_uniq<DependencyManager>(*this)),
-      schemas(make_uniq<CatalogSet>(*this, make_uniq<DefaultSchemaGenerator>(*this))) {
+      schemas(make_uniq<CatalogSet>(*this, IsSystemCatalog() ? make_uniq<DefaultSchemaGenerator>(*this) : nullptr)) {
 }
 
 DuckCatalog::~DuckCatalog() {
@@ -35,13 +33,11 @@ void DuckCatalog::Initialize(bool load_builtin) {
 	CreateSchema(data, info);
 
 	if (load_builtin) {
-		// initialize default functions
 		BuiltinFunctions builtin(data, *this);
 		builtin.Initialize();
 
-#ifndef DISABLE_CORE_FUNCTIONS_EXTENSION
-		CoreFunctions::RegisterFunctions(*this, data);
-#endif
+		// initialize default functions
+		FunctionList::RegisterFunctions(*this, data);
 	}
 
 	Verify();
@@ -51,17 +47,25 @@ bool DuckCatalog::IsDuckCatalog() {
 	return true;
 }
 
+optional_ptr<DependencyManager> DuckCatalog::GetDependencyManager() {
+	return dependency_manager.get();
+}
+
 //===--------------------------------------------------------------------===//
 // Schema
 //===--------------------------------------------------------------------===//
 optional_ptr<CatalogEntry> DuckCatalog::CreateSchemaInternal(CatalogTransaction transaction, CreateSchemaInfo &info) {
 	LogicalDependencyList dependencies;
+
+	if (!info.internal && DefaultSchemaGenerator::IsDefaultSchema(info.schema)) {
+		return nullptr;
+	}
 	auto entry = make_uniq<DuckSchemaEntry>(*this, info);
 	auto result = entry.get();
 	if (!schemas->CreateEntry(transaction, info.schema, std::move(entry), dependencies)) {
 		return nullptr;
 	}
-	return (CatalogEntry *)result;
+	return result;
 }
 
 optional_ptr<CatalogEntry> DuckCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
@@ -95,7 +99,6 @@ optional_ptr<CatalogEntry> DuckCatalog::CreateSchema(CatalogTransaction transact
 
 void DuckCatalog::DropSchema(CatalogTransaction transaction, DropInfo &info) {
 	D_ASSERT(!info.name.empty());
-	ModifyCatalog();
 	if (!schemas->DropEntry(transaction, info.name, info.cascade)) {
 		if (info.if_not_found == OnEntryNotFound::THROW_EXCEPTION) {
 			throw CatalogException::MissingEntry(CatalogType::SCHEMA_ENTRY, info.name, string());
@@ -114,6 +117,10 @@ void DuckCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaC
 
 void DuckCatalog::ScanSchemas(std::function<void(SchemaCatalogEntry &)> callback) {
 	schemas->Scan([&](CatalogEntry &entry) { callback(entry.Cast<SchemaCatalogEntry>()); });
+}
+
+CatalogSet &DuckCatalog::GetSchemaCatalogSet() {
+	return *schemas;
 }
 
 optional_ptr<SchemaCatalogEntry> DuckCatalog::GetSchema(CatalogTransaction transaction, const string &schema_name,
@@ -154,6 +161,13 @@ void DuckCatalog::Verify() {
 	Catalog::Verify();
 	schemas->Verify(*this);
 #endif
+}
+
+optional_idx DuckCatalog::GetCatalogVersion(ClientContext &context) {
+	auto &transaction_manager = DuckTransactionManager::Get(db);
+	auto transaction = GetCatalogTransaction(context);
+	D_ASSERT(transaction.transaction);
+	return transaction_manager.GetCatalogVersion(*transaction.transaction);
 }
 
 } // namespace duckdb

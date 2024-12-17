@@ -1,4 +1,5 @@
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
+#include "duckdb/catalog/default/default_schemas.hpp"
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/algorithm.hpp"
@@ -30,12 +31,26 @@ SimilarCatalogEntry SchemaCatalogEntry::GetSimilarEntry(CatalogTransaction trans
                                                         const string &name) {
 	SimilarCatalogEntry result;
 	Scan(transaction.GetContext(), type, [&](CatalogEntry &entry) {
-		auto ldist = StringUtil::SimilarityScore(entry.name, name);
-		if (ldist < result.distance) {
-			result.distance = ldist;
+		auto entry_score = StringUtil::SimilarityRating(entry.name, name);
+		if (entry_score > result.score) {
+			result.score = entry_score;
 			result.name = entry.name;
 		}
 	});
+	return result;
+}
+
+//! This should not be used, it's only implemented to not put the burden of implementing it on every derived class of
+//! SchemaCatalogEntry
+CatalogSet::EntryLookup SchemaCatalogEntry::GetEntryDetailed(CatalogTransaction transaction, CatalogType type,
+                                                             const string &name) {
+	CatalogSet::EntryLookup result;
+	result.result = GetEntry(transaction, type, name);
+	if (!result.result) {
+		result.reason = CatalogSet::EntryLookup::FailureReason::DELETED;
+	} else {
+		result.reason = CatalogSet::EntryLookup::FailureReason::SUCCESS;
+	}
 	return result;
 }
 

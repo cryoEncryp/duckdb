@@ -13,6 +13,7 @@
 #include "duckdb/common/serializer/deserializer.hpp"
 #include "duckdb/common/serializer/serializer.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/type_visitor.hpp"
 #include "duckdb/common/types/decimal.hpp"
 #include "duckdb/common/types/hash.hpp"
 #include "duckdb/common/types/string_type.hpp"
@@ -24,11 +25,11 @@
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/client_data.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/parser/keyword_helper.hpp"
 #include "duckdb/parser/parser.hpp"
-#include "duckdb/main/config.hpp"
 
 #include <cmath>
 
@@ -117,6 +118,7 @@ PhysicalType LogicalType::GetInternalType() {
 	case LogicalTypeId::CHAR:
 	case LogicalTypeId::BLOB:
 	case LogicalTypeId::BIT:
+	case LogicalTypeId::VARINT:
 		return PhysicalType::VARCHAR;
 	case LogicalTypeId::INTERVAL:
 		return PhysicalType::INTERVAL;
@@ -170,6 +172,7 @@ string LogicalTypeIdToString(LogicalTypeId type) {
 
 constexpr const LogicalTypeId LogicalType::INVALID;
 constexpr const LogicalTypeId LogicalType::SQLNULL;
+constexpr const LogicalTypeId LogicalType::UNKNOWN;
 constexpr const LogicalTypeId LogicalType::BOOLEAN;
 constexpr const LogicalTypeId LogicalType::TINYINT;
 constexpr const LogicalTypeId LogicalType::UTINYINT;
@@ -203,6 +206,8 @@ constexpr const LogicalTypeId LogicalType::VARCHAR;
 
 constexpr const LogicalTypeId LogicalType::BLOB;
 constexpr const LogicalTypeId LogicalType::BIT;
+constexpr const LogicalTypeId LogicalType::VARINT;
+
 constexpr const LogicalTypeId LogicalType::INTERVAL;
 constexpr const LogicalTypeId LogicalType::ROW_TYPE;
 
@@ -236,14 +241,14 @@ const vector<LogicalType> LogicalType::Real() {
 
 const vector<LogicalType> LogicalType::AllTypes() {
 	vector<LogicalType> types = {
-	    LogicalType::BOOLEAN,      LogicalType::TINYINT,  LogicalType::SMALLINT,  LogicalType::INTEGER,
-	    LogicalType::BIGINT,       LogicalType::DATE,     LogicalType::TIMESTAMP, LogicalType::DOUBLE,
-	    LogicalType::FLOAT,        LogicalType::VARCHAR,  LogicalType::BLOB,      LogicalType::BIT,
-	    LogicalType::INTERVAL,     LogicalType::HUGEINT,  LogicalTypeId::DECIMAL, LogicalType::UTINYINT,
-	    LogicalType::USMALLINT,    LogicalType::UINTEGER, LogicalType::UBIGINT,   LogicalType::UHUGEINT,
-	    LogicalType::TIME,         LogicalTypeId::LIST,   LogicalTypeId::STRUCT,  LogicalType::TIME_TZ,
-	    LogicalType::TIMESTAMP_TZ, LogicalTypeId::MAP,    LogicalTypeId::UNION,   LogicalType::UUID,
-	    LogicalTypeId::ARRAY};
+	    LogicalType::BOOLEAN,  LogicalType::TINYINT,      LogicalType::SMALLINT,  LogicalType::INTEGER,
+	    LogicalType::BIGINT,   LogicalType::DATE,         LogicalType::TIMESTAMP, LogicalType::DOUBLE,
+	    LogicalType::FLOAT,    LogicalType::VARCHAR,      LogicalType::BLOB,      LogicalType::BIT,
+	    LogicalType::VARINT,   LogicalType::INTERVAL,     LogicalType::HUGEINT,   LogicalTypeId::DECIMAL,
+	    LogicalType::UTINYINT, LogicalType::USMALLINT,    LogicalType::UINTEGER,  LogicalType::UBIGINT,
+	    LogicalType::UHUGEINT, LogicalType::TIME,         LogicalTypeId::LIST,    LogicalTypeId::STRUCT,
+	    LogicalType::TIME_TZ,  LogicalType::TIMESTAMP_TZ, LogicalTypeId::MAP,     LogicalTypeId::UNION,
+	    LogicalType::UUID,     LogicalTypeId::ARRAY};
 	return types;
 }
 
@@ -524,7 +529,67 @@ LogicalType TransformStringToLogicalType(const string &str) {
 	if (StringUtil::Lower(str) == "null") {
 		return LogicalType::SQLNULL;
 	}
-	return Parser::ParseColumnList("dummy " + str).GetColumn(LogicalIndex(0)).Type();
+	ColumnList column_list;
+	try {
+		column_list = Parser::ParseColumnList("dummy " + str);
+	} catch (const std::runtime_error &e) {
+		const vector<string> suggested_types {"BIGINT",
+		                                      "INT8",
+		                                      "LONG",
+		                                      "BIT",
+		                                      "BITSTRING",
+		                                      "BLOB",
+		                                      "BYTEA",
+		                                      "BINARY,",
+		                                      "VARBINARY",
+		                                      "BOOLEAN",
+		                                      "BOOL",
+		                                      "LOGICAL",
+		                                      "DATE",
+		                                      "DECIMAL(prec, scale)",
+		                                      "DOUBLE",
+		                                      "FLOAT8",
+		                                      "FLOAT",
+		                                      "FLOAT4",
+		                                      "REAL",
+		                                      "HUGEINT",
+		                                      "INTEGER",
+		                                      "INT4",
+		                                      "INT",
+		                                      "SIGNED",
+		                                      "INTERVAL",
+		                                      "SMALLINT",
+		                                      "INT2",
+		                                      "SHORT",
+		                                      "TIME",
+		                                      "TIMESTAMPTZ",
+		                                      "TIMESTAMP",
+		                                      "DATETIME",
+		                                      "TINYINT",
+		                                      "INT1",
+		                                      "UBIGINT",
+		                                      "UHUGEINT",
+		                                      "UINTEGER",
+		                                      "USMALLINT",
+		                                      "UTINYINT",
+		                                      "UUID",
+		                                      "VARCHAR",
+		                                      "CHAR",
+		                                      "BPCHAR",
+		                                      "TEXT",
+		                                      "STRING",
+		                                      "MAP(INTEGER, VARCHAR)",
+		                                      "UNION(num INTEGER, text VARCHAR)"};
+		std::ostringstream error;
+		error << "Value \"" << str << "\" can not be converted to a DuckDB Type." << '\n';
+		error << "Possible examples as suggestions: " << '\n';
+		auto suggestions = StringUtil::TopNJaroWinkler(suggested_types, str);
+		for (auto &suggestion : suggestions) {
+			error << "* " << suggestion << '\n';
+		}
+		throw InvalidInputException(error.str());
+	}
+	return column_list.GetColumn(LogicalIndex(0)).Type();
 }
 
 LogicalType GetUserTypeRecursive(const LogicalType &type, ClientContext &context) {
@@ -596,12 +661,98 @@ bool LogicalType::IsNumeric() const {
 	}
 }
 
+bool LogicalType::IsTemporal() const {
+	switch (id_) {
+	case LogicalTypeId::DATE:
+	case LogicalTypeId::TIME:
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIME_TZ:
+	case LogicalTypeId::TIMESTAMP_TZ:
+	case LogicalTypeId::TIMESTAMP_SEC:
+	case LogicalTypeId::TIMESTAMP_MS:
+	case LogicalTypeId::TIMESTAMP_NS:
+		return true;
+	default:
+		return false;
+	}
+}
+
 bool LogicalType::IsValid() const {
 	return id() != LogicalTypeId::INVALID && id() != LogicalTypeId::UNKNOWN;
 }
 
-bool LogicalType::Contains(LogicalTypeId type_id) const {
-	return Contains([&](const LogicalType &type) { return type.id() == type_id; });
+bool LogicalType::IsComplete() const {
+	// Check if type does not contain incomplete types
+	return !TypeVisitor::Contains(*this, [](const LogicalType &type) {
+		switch (type.id()) {
+		case LogicalTypeId::INVALID:
+		case LogicalTypeId::UNKNOWN:
+		case LogicalTypeId::ANY:
+			return true; // These are incomplete by default
+		case LogicalTypeId::LIST:
+		case LogicalTypeId::MAP:
+			if (!type.AuxInfo() || type.AuxInfo()->type != ExtraTypeInfoType::LIST_TYPE_INFO) {
+				return true; // Missing or incorrect type info
+			}
+			break;
+		case LogicalTypeId::STRUCT:
+		case LogicalTypeId::UNION:
+			if (!type.AuxInfo() || type.AuxInfo()->type != ExtraTypeInfoType::STRUCT_TYPE_INFO) {
+				return true; // Missing or incorrect type info
+			}
+			break;
+		case LogicalTypeId::ARRAY:
+			if (!type.AuxInfo() || type.AuxInfo()->type != ExtraTypeInfoType::ARRAY_TYPE_INFO) {
+				return true; // Missing or incorrect type info
+			}
+			break;
+		case LogicalTypeId::DECIMAL:
+			if (!type.AuxInfo() || type.AuxInfo()->type != ExtraTypeInfoType::DECIMAL_TYPE_INFO) {
+				return true; // Missing or incorrect type info
+			}
+			break;
+		case LogicalTypeId::ENUM:
+			if (!type.AuxInfo() || type.AuxInfo()->type != ExtraTypeInfoType::ENUM_TYPE_INFO) {
+				return true; // Missing or incorrect type info
+			}
+			break;
+		default:
+			return false;
+		}
+
+		// Type has type info, check if it is complete
+		D_ASSERT(type.AuxInfo());
+		switch (type.AuxInfo()->type) {
+		case ExtraTypeInfoType::STRUCT_TYPE_INFO:
+			return type.AuxInfo()->Cast<StructTypeInfo>().child_types.empty(); // Cannot be empty
+		case ExtraTypeInfoType::DECIMAL_TYPE_INFO:
+			return DecimalType::GetWidth(type) >= 1 && DecimalType::GetWidth(type) <= Decimal::MAX_WIDTH_DECIMAL &&
+			       DecimalType::GetScale(type) <= DecimalType::GetWidth(type);
+		default:
+			return false; // Nested types are checked by TypeVisitor recursion
+		}
+	});
+}
+
+bool LogicalType::SupportsRegularUpdate() const {
+	switch (id()) {
+	case LogicalTypeId::LIST:
+	case LogicalTypeId::ARRAY:
+	case LogicalTypeId::MAP:
+	case LogicalTypeId::UNION:
+		return false;
+	case LogicalTypeId::STRUCT: {
+		auto &child_types = StructType::GetChildTypes(*this);
+		for (auto &entry : child_types) {
+			if (!entry.second.SupportsRegularUpdate()) {
+				return false;
+			}
+		}
+		return true;
+	}
+	default:
+		return true;
+	}
 }
 
 bool LogicalType::GetDecimalProperties(uint8_t &width, uint8_t &scale) const {
@@ -752,6 +903,8 @@ LogicalType LogicalType::NormalizeType(const LogicalType &type) {
 		return LogicalType::VARCHAR;
 	case LogicalTypeId::INTEGER_LITERAL:
 		return IntegerLiteral::GetType(type);
+	case LogicalTypeId::UNKNOWN:
+		throw ParameterNotResolvedException();
 	default:
 		return type;
 	}
@@ -760,14 +913,8 @@ LogicalType LogicalType::NormalizeType(const LogicalType &type) {
 template <class OP>
 static bool CombineUnequalTypes(const LogicalType &left, const LogicalType &right, LogicalType &result) {
 	// left and right are not equal
-	// for enums, match the varchar rules
-	if (left.id() == LogicalTypeId::ENUM) {
-		return OP::Operation(LogicalType::VARCHAR, right, result);
-	} else if (right.id() == LogicalTypeId::ENUM) {
-		return OP::Operation(left, LogicalType::VARCHAR, result);
-	}
-	// NULL/string literals/unknown (parameter) types always take the other type
-	LogicalTypeId other_types[] = {LogicalTypeId::UNKNOWN, LogicalTypeId::SQLNULL, LogicalTypeId::STRING_LITERAL};
+	// NULL/unknown (parameter) types always take the other type
+	LogicalTypeId other_types[] = {LogicalTypeId::SQLNULL, LogicalTypeId::UNKNOWN};
 	for (auto &other_type : other_types) {
 		if (left.id() == other_type) {
 			result = LogicalType::NormalizeType(right);
@@ -776,6 +923,22 @@ static bool CombineUnequalTypes(const LogicalType &left, const LogicalType &righ
 			result = LogicalType::NormalizeType(left);
 			return true;
 		}
+	}
+
+	// for enums, match the varchar rules
+	if (left.id() == LogicalTypeId::ENUM) {
+		return OP::Operation(LogicalType::VARCHAR, right, result);
+	} else if (right.id() == LogicalTypeId::ENUM) {
+		return OP::Operation(left, LogicalType::VARCHAR, result);
+	}
+
+	// for everything but enums - string literals also take the other type
+	if (left.id() == LogicalTypeId::STRING_LITERAL) {
+		result = LogicalType::NormalizeType(right);
+		return true;
+	} else if (right.id() == LogicalTypeId::STRING_LITERAL) {
+		result = LogicalType::NormalizeType(left);
+		return true;
 	}
 
 	// for other types - use implicit cast rules to check if we can combine the types
@@ -1048,6 +1211,8 @@ static idx_t GetLogicalTypeScore(const LogicalType &type) {
 		return 101;
 	case LogicalTypeId::UUID:
 		return 102;
+	case LogicalTypeId::VARINT:
+		return 103;
 	// nested types
 	case LogicalTypeId::STRUCT:
 		return 125;
@@ -1370,7 +1535,7 @@ bool StructType::IsUnnamed(const LogicalType &type) {
 	if (child_types.empty()) {
 		return false;
 	}
-	return child_types[0].first.empty();
+	return child_types[0].first.empty(); // NOLINT
 }
 
 LogicalType LogicalType::STRUCT(child_list_t<LogicalType> children) {
@@ -1467,35 +1632,30 @@ const child_list_t<LogicalType> UnionType::CopyMemberTypes(const LogicalType &ty
 const string &UserType::GetCatalog(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::USER);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<UserTypeInfo>().catalog;
 }
 
 const string &UserType::GetSchema(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::USER);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<UserTypeInfo>().schema;
 }
 
 const string &UserType::GetTypeName(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::USER);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<UserTypeInfo>().user_type_name;
 }
 
 const vector<Value> &UserType::GetTypeModifiers(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::USER);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<UserTypeInfo>().user_type_modifiers;
 }
 
 vector<Value> &UserType::GetTypeModifiers(LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::USER);
 	auto info = type.GetAuxInfoShrPtr();
-	D_ASSERT(info);
 	return info->Cast<UserTypeInfo>().user_type_modifiers;
 }
 
@@ -1535,21 +1695,18 @@ const string EnumType::GetValue(const Value &val) {
 const Vector &EnumType::GetValuesInsertOrder(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ENUM);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<EnumTypeInfo>().GetValuesInsertOrder();
 }
 
 idx_t EnumType::GetSize(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ENUM);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<EnumTypeInfo>().GetDictSize();
 }
 
 PhysicalType EnumType::GetPhysicalType(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ENUM);
 	auto aux_info = type.AuxInfo();
-	D_ASSERT(aux_info);
 	auto &info = aux_info->Cast<EnumTypeInfo>();
 	D_ASSERT(info.GetEnumDictType() == EnumDictType::VECTOR_DICT);
 	return EnumTypeInfo::DictType(info.GetDictSize());
@@ -1575,21 +1732,18 @@ bool LogicalType::IsJSONType() const {
 const LogicalType &ArrayType::GetChildType(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ARRAY);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<ArrayTypeInfo>().child_type;
 }
 
 idx_t ArrayType::GetSize(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ARRAY);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<ArrayTypeInfo>().size;
 }
 
 bool ArrayType::IsAnySize(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::ARRAY);
 	auto info = type.AuxInfo();
-	D_ASSERT(info);
 	return info->Cast<ArrayTypeInfo>().size == 0;
 }
 
@@ -1670,7 +1824,7 @@ idx_t AnyType::GetCastScore(const LogicalType &type) {
 LogicalType IntegerLiteral::GetType(const LogicalType &type) {
 	D_ASSERT(type.id() == LogicalTypeId::INTEGER_LITERAL);
 	auto info = type.AuxInfo();
-	D_ASSERT(info && info->type == ExtraTypeInfoType::INTEGER_LITERAL_TYPE_INFO);
+	D_ASSERT(info->type == ExtraTypeInfoType::INTEGER_LITERAL_TYPE_INFO);
 	return info->Cast<IntegerLiteralTypeInfo>().constant_value.type();
 }
 
@@ -1685,7 +1839,7 @@ bool IntegerLiteral::FitsInType(const LogicalType &type, const LogicalType &targ
 	}
 	// we can cast to integral types if the constant value fits within that type
 	auto info = type.AuxInfo();
-	D_ASSERT(info && info->type == ExtraTypeInfoType::INTEGER_LITERAL_TYPE_INFO);
+	D_ASSERT(info->type == ExtraTypeInfoType::INTEGER_LITERAL_TYPE_INFO);
 	auto &literal_info = info->Cast<IntegerLiteralTypeInfo>();
 	Value copy = literal_info.constant_value;
 	return copy.DefaultTryCastAs(target);

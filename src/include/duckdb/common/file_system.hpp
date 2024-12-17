@@ -53,7 +53,7 @@ enum class FileType {
 
 struct FileHandle {
 public:
-	DUCKDB_API FileHandle(FileSystem &file_system, string path);
+	DUCKDB_API FileHandle(FileSystem &file_system, string path, FileOpenFlags flags);
 	FileHandle(const FileHandle &) = delete;
 	DUCKDB_API virtual ~FileHandle();
 
@@ -68,6 +68,8 @@ public:
 	DUCKDB_API void Truncate(int64_t new_size);
 	DUCKDB_API string ReadLine();
 	DUCKDB_API bool Trim(idx_t offset_bytes, idx_t length_bytes);
+	DUCKDB_API virtual idx_t GetProgress();
+	DUCKDB_API virtual FileCompressionType GetFileCompressionType();
 
 	DUCKDB_API bool CanSeek();
 	DUCKDB_API bool IsPipe();
@@ -80,6 +82,10 @@ public:
 
 	string GetPath() const {
 		return path;
+	}
+
+	FileOpenFlags GetFlags() const {
+		return flags;
 	}
 
 	template <class TARGET>
@@ -96,6 +102,7 @@ public:
 public:
 	FileSystem &file_system;
 	string path;
+	FileOpenFlags flags;
 };
 
 class FileSystem {

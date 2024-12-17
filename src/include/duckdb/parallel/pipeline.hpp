@@ -90,13 +90,14 @@ public:
 	void ResetSource(bool force);
 	void ClearSource();
 	void Schedule(shared_ptr<Event> &event);
+	void PrepareFinalize();
 
 	string ToString() const;
 	void Print() const;
 	void PrintDependencies() const;
 
 	//! Returns query progress
-	bool GetProgress(double &current_percentage, idx_t &estimated_cardinality);
+	bool GetProgress(ProgressData &progress_data);
 
 	//! Returns a list of all operators (including source and sink) involved in this pipeline
 	vector<reference<PhysicalOperator>> GetOperators();

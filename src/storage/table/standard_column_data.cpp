@@ -21,43 +21,16 @@ void StandardColumnData::SetStart(idx_t new_start) {
 	validity.SetStart(new_start);
 }
 
-ScanVectorType StandardColumnData::GetVectorScanType(ColumnScanState &state, idx_t scan_count) {
+ScanVectorType StandardColumnData::GetVectorScanType(ColumnScanState &state, idx_t scan_count, Vector &result) {
 	// if either the current column data, or the validity column data requires flat vectors, we scan flat vectors
-	auto scan_type = ColumnData::GetVectorScanType(state, scan_count);
+	auto scan_type = ColumnData::GetVectorScanType(state, scan_count, result);
 	if (scan_type == ScanVectorType::SCAN_FLAT_VECTOR) {
 		return ScanVectorType::SCAN_FLAT_VECTOR;
 	}
 	if (state.child_states.empty()) {
 		return scan_type;
 	}
-	return validity.GetVectorScanType(state.child_states[0], scan_count);
-}
-
-bool StandardColumnData::CheckZonemap(ColumnScanState &state, TableFilter &filter) {
-	if (!state.segment_checked) {
-		if (!state.current) {
-			return true;
-		}
-		state.segment_checked = true;
-		FilterPropagateResult prune_result;
-		{
-			lock_guard<mutex> l(stats_lock);
-			prune_result = filter.CheckStatistics(state.current->stats.statistics);
-			if (prune_result != FilterPropagateResult::FILTER_ALWAYS_FALSE) {
-				return true;
-			}
-		}
-		lock_guard<mutex> l(update_lock);
-		if (updates) {
-			auto update_stats = updates->GetStatistics();
-			prune_result = filter.CheckStatistics(*update_stats);
-			return prune_result != FilterPropagateResult::FILTER_ALWAYS_FALSE;
-		} else {
-			return false;
-		}
-	} else {
-		return true;
-	}
+	return validity.GetVectorScanType(state.child_states[0], scan_count, result);
 }
 
 void StandardColumnData::InitializePrefetch(PrefetchState &prefetch_state, ColumnScanState &scan_state, idx_t rows) {
@@ -84,8 +57,10 @@ void StandardColumnData::InitializeScanWithOffset(ColumnScanState &state, idx_t 
 idx_t StandardColumnData::Scan(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
                                idx_t target_count) {
 	D_ASSERT(state.row_index == state.child_states[0].row_index);
-	auto scan_count = ColumnData::Scan(transaction, vector_index, state, result, target_count);
-	validity.Scan(transaction, vector_index, state.child_states[0], result, target_count);
+	auto scan_type = GetVectorScanType(state, target_count, result);
+	auto mode = ScanVectorMode::REGULAR_SCAN;
+	auto scan_count = ScanVector(transaction, vector_index, state, result, target_count, scan_type, mode);
+	validity.ScanVector(transaction, vector_index, state.child_states[0], result, target_count, scan_type, mode);
 	return scan_count;
 }
 
@@ -101,6 +76,43 @@ idx_t StandardColumnData::ScanCount(ColumnScanState &state, Vector &result, idx_
 	auto scan_count = ColumnData::ScanCount(state, result, count);
 	validity.ScanCount(state.child_states[0], result, count);
 	return scan_count;
+}
+
+void StandardColumnData::Filter(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
+                                SelectionVector &sel, idx_t &count, const TableFilter &filter) {
+	// check if we can do a specialized select
+	// the compression functions need to support this
+	bool has_select = compression && compression->filter;
+	bool validity_has_select = validity.compression && validity.compression->filter;
+	auto target_count = GetVectorCount(vector_index);
+	auto scan_type = GetVectorScanType(state, target_count, result);
+	bool scan_entire_vector = scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR;
+	bool verify_fetch_row = state.scan_options && state.scan_options->force_fetch_row;
+	if (!has_select || !validity_has_select || !scan_entire_vector || verify_fetch_row) {
+		// we are not scanning an entire vector - this can have several causes (updates, etc)
+		ColumnData::Filter(transaction, vector_index, state, result, sel, count, filter);
+		return;
+	}
+	FilterVector(state, result, target_count, sel, count, filter);
+	validity.FilterVector(state.child_states[0], result, target_count, sel, count, filter);
+}
+
+void StandardColumnData::Select(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
+                                SelectionVector &sel, idx_t sel_count) {
+	// check if we can do a specialized select
+	// the compression functions need to support this
+	bool has_select = compression && compression->select;
+	bool validity_has_select = validity.compression && validity.compression->select;
+	auto target_count = GetVectorCount(vector_index);
+	auto scan_type = GetVectorScanType(state, target_count, result);
+	bool scan_entire_vector = scan_type == ScanVectorType::SCAN_ENTIRE_VECTOR;
+	if (!has_select || !validity_has_select || !scan_entire_vector) {
+		// we are not scanning an entire vector - this can have several causes (updates, etc)
+		ColumnData::Select(transaction, vector_index, state, result, sel, sel_count);
+		return;
+	}
+	SelectVector(state, result, target_count, sel, sel_count);
+	validity.SelectVector(state.child_states[0], result, target_count, sel, sel_count);
 }
 
 void StandardColumnData::InitializeAppend(ColumnAppendState &state) {
@@ -196,10 +208,10 @@ public:
 		return std::move(global_stats);
 	}
 
-	void WriteDataPointers(RowGroupWriter &writer, Serializer &serializer) override {
-		ColumnCheckpointState::WriteDataPointers(writer, serializer);
-		serializer.WriteObject(101, "validity",
-		                       [&](Serializer &serializer) { validity_state->WriteDataPointers(writer, serializer); });
+	PersistentColumnData ToPersistentData() override {
+		auto data = ColumnCheckpointState::ToPersistentData();
+		data.child_columns.push_back(validity_state->ToPersistentData());
+		return data;
 	}
 };
 
@@ -230,10 +242,19 @@ void StandardColumnData::CheckpointScan(ColumnSegment &segment, ColumnScanState 
 	validity.ScanCommittedRange(row_group_start, offset_in_row_group, count, scan_vector);
 }
 
-void StandardColumnData::DeserializeColumn(Deserializer &deserializer, BaseStatistics &target_stats) {
-	ColumnData::DeserializeColumn(deserializer, target_stats);
-	deserializer.ReadObject(
-	    101, "validity", [&](Deserializer &deserializer) { validity.DeserializeColumn(deserializer, target_stats); });
+bool StandardColumnData::IsPersistent() {
+	return ColumnData::IsPersistent() && validity.IsPersistent();
+}
+
+PersistentColumnData StandardColumnData::Serialize() {
+	auto persistent_data = ColumnData::Serialize();
+	persistent_data.child_columns.push_back(validity.Serialize());
+	return persistent_data;
+}
+
+void StandardColumnData::InitializeColumn(PersistentColumnData &column_data, BaseStatistics &target_stats) {
+	ColumnData::InitializeColumn(column_data, target_stats);
+	validity.InitializeColumn(column_data.child_columns[0], target_stats);
 }
 
 void StandardColumnData::GetColumnSegmentInfo(duckdb::idx_t row_group_index, vector<duckdb::idx_t> col_path,

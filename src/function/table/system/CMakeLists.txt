@@ -19,12 +19,14 @@ add_library_unity(
   duckdb_tables.cpp
   duckdb_temporary_files.cpp
   duckdb_types.cpp
+  duckdb_variables.cpp
   duckdb_views.cpp
   pragma_collations.cpp
   pragma_database_size.cpp
   pragma_metadata_info.cpp
   pragma_storage_info.cpp
   pragma_table_info.cpp
+  pragma_table_sample.cpp
   pragma_user_agent.cpp
   test_all_types.cpp
   test_vector_types.cpp)

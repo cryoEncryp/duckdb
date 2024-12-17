@@ -10,11 +10,13 @@
 
 #include "duckdb/common/enum_util.hpp"
 #include "duckdb/common/serializer/serialization_traits.hpp"
+#include "duckdb/common/serializer/serialization_data.hpp"
 #include "duckdb/common/types/interval.hpp"
 #include "duckdb/common/types/string_type.hpp"
 #include "duckdb/common/types/uhugeint.hpp"
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/common/unordered_set.hpp"
+#include "duckdb/common/queue.hpp"
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/optionally_owned_ptr.hpp"
 #include "duckdb/common/value_operations/value_operations.hpp"
@@ -34,6 +36,7 @@ public:
 class Serializer {
 protected:
 	SerializationOptions options;
+	SerializationData data;
 
 public:
 	virtual ~Serializer() {
@@ -65,6 +68,14 @@ public:
 	};
 
 public:
+	SerializationData &GetSerializationData() {
+		return data;
+	}
+
+	void SetSerializationData(const SerializationData &other) {
+		data = other;
+	}
+
 	// Serialize a value
 	template <class T>
 	void WriteProperty(const field_id_t field_id, const char *tag, const T &value) {

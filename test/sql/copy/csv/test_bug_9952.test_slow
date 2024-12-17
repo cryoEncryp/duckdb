@@ -1,0 +1,17 @@
+# name: test/sql/copy/csv/test_bug_9952.test_slow
+# description: Test bug from issue 9952
+# group: [csv]
+
+statement ok
+PRAGMA enable_verification
+
+statement error
+FROM read_csv('data/csv/num.tsv.gz',quote = '"', rfc_4180=true)
+----
+Value with unterminated quote found.
+
+statement ok
+FROM read_csv('data/csv/num.tsv.gz',quote = '"')
+
+statement ok
+FROM read_csv('data/csv/num.tsv.gz')

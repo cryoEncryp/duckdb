@@ -3,7 +3,7 @@ import os
 import pytest
 
 pd = pytest.importorskip("pandas")
-pa = pytest.importorskip("pyarrow")
+pa = pytest.importorskip('pyarrow', '18.0.0')
 from typing import Union
 import pyarrow.compute as pc
 import uuid
@@ -68,7 +68,6 @@ class TestScalarUDF(object):
 
         con = duckdb.connect()
         con.create_function('test', test_function, type=function_type)
-
         # Single value
         res = con.execute(f"select test(?::{str(type)})", [value]).fetchall()
         assert res[0][0] == value
@@ -129,7 +128,7 @@ class TestScalarUDF(object):
         con.create_function('test_map', no_op, [map_type], map_type, type=udf_type)
         rel = con.sql("select test_map(map(['non-inlined string', 'test', 'duckdb'], [42, 1337, 123]))")
         res = rel.fetchall()
-        assert res == [({'key': ['non-inlined string', 'test', 'duckdb'], 'value': [42, 1337, 123]},)]
+        assert res == [({'non-inlined string': 42, 'test': 1337, 'duckdb': 123},)]
 
     @pytest.mark.parametrize('udf_type', ['arrow', 'native'])
     def test_exceptions(self, udf_type):
@@ -291,19 +290,9 @@ class TestScalarUDF(object):
         # Using fetchone keeps the result open, with a transaction
         rel.fetchone()
 
-        # If we would allow a UDF to be created when a transaction is active
-        # then starting a new result-fetch would cancel the transaction
-        # which would corrupt our internal mechanism used to check if a UDF is already registered
-        # because that isn't transaction-aware
-        with pytest.raises(
-            duckdb.InvalidInputException,
-            match='This function can not be called with an active transaction!, commit or abort the existing one first',
-        ):
-            con.create_function('func', func)
+        con.create_function('func', func)
 
-        # This would cancel the previous transaction, causing the function to no longer exist
         rel.fetchall()
 
-        con.create_function('func', func)
         res = con.sql('select func(5)').fetchall()
         assert res == [(5,)]

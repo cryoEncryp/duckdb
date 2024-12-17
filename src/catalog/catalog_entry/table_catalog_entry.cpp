@@ -32,7 +32,7 @@ bool TableCatalogEntry::HasGeneratedColumns() const {
 	return columns.LogicalColumnCount() != columns.PhysicalColumnCount();
 }
 
-LogicalIndex TableCatalogEntry::GetColumnIndex(string &column_name, bool if_exists) {
+LogicalIndex TableCatalogEntry::GetColumnIndex(string &column_name, bool if_exists) const {
 	auto entry = columns.GetColumnIndex(column_name);
 	if (!entry.IsValid()) {
 		if (if_exists) {
@@ -43,15 +43,19 @@ LogicalIndex TableCatalogEntry::GetColumnIndex(string &column_name, bool if_exis
 	return entry;
 }
 
-bool TableCatalogEntry::ColumnExists(const string &name) {
+unique_ptr<BlockingSample> TableCatalogEntry::GetSample() {
+	return nullptr;
+}
+
+bool TableCatalogEntry::ColumnExists(const string &name) const {
 	return columns.ColumnExists(name);
 }
 
-const ColumnDefinition &TableCatalogEntry::GetColumn(const string &name) {
+const ColumnDefinition &TableCatalogEntry::GetColumn(const string &name) const {
 	return columns.GetColumn(name);
 }
 
-vector<LogicalType> TableCatalogEntry::GetTypes() {
+vector<LogicalType> TableCatalogEntry::GetTypes() const {
 	vector<LogicalType> types;
 	for (auto &col : columns.Physical()) {
 		types.push_back(col.Type());
@@ -176,6 +180,24 @@ string TableCatalogEntry::ColumnsToSQL(const ColumnList &columns, const vector<u
 	return ss.str();
 }
 
+string TableCatalogEntry::ColumnNamesToSQL(const ColumnList &columns) {
+	if (columns.empty()) {
+		return "";
+	}
+
+	std::stringstream ss;
+	ss << "(";
+
+	for (auto &column : columns.Logical()) {
+		if (column.Oid() > 0) {
+			ss << ", ";
+		}
+		ss << KeywordHelper::WriteOptionallyQuoted(column.Name()) << " ";
+	}
+	ss << ")";
+	return ss.str();
+}
+
 string TableCatalogEntry::ToSQL() const {
 	auto create_info = GetInfo();
 	return create_info->ToString();
@@ -185,7 +207,7 @@ const ColumnList &TableCatalogEntry::GetColumns() const {
 	return columns;
 }
 
-const ColumnDefinition &TableCatalogEntry::GetColumn(LogicalIndex idx) {
+const ColumnDefinition &TableCatalogEntry::GetColumn(LogicalIndex idx) const {
 	return columns.GetColumn(idx);
 }
 
@@ -226,32 +248,10 @@ static void BindExtraColumns(TableCatalogEntry &table, LogicalGet &get, LogicalP
 			update.expressions.push_back(make_uniq<BoundColumnRefExpression>(
 			    column.Type(), ColumnBinding(proj.table_index, proj.expressions.size())));
 			proj.expressions.push_back(make_uniq<BoundColumnRefExpression>(
-			    column.Type(), ColumnBinding(get.table_index, get.column_ids.size())));
-			get.column_ids.push_back(check_column_id.index);
+			    column.Type(), ColumnBinding(get.table_index, get.GetColumnIds().size())));
+			get.AddColumnId(check_column_id.index);
 			update.columns.push_back(check_column_id);
 		}
-	}
-}
-
-static bool TypeSupportsRegularUpdate(const LogicalType &type) {
-	switch (type.id()) {
-	case LogicalTypeId::LIST:
-	case LogicalTypeId::ARRAY:
-	case LogicalTypeId::MAP:
-	case LogicalTypeId::UNION:
-		// lists and maps and unions don't support updates directly
-		return false;
-	case LogicalTypeId::STRUCT: {
-		auto &child_types = StructType::GetChildTypes(type);
-		for (auto &entry : child_types) {
-			if (!TypeSupportsRegularUpdate(entry.second)) {
-				return false;
-			}
-		}
-		return true;
-	}
-	default:
-		return true;
 	}
 }
 
@@ -299,7 +299,7 @@ void TableCatalogEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, L
 	// we also convert any updates on LIST columns into delete + insert
 	for (auto &col_index : update.columns) {
 		auto &column = GetColumns().GetColumn(col_index);
-		if (!TypeSupportsRegularUpdate(column.Type())) {
+		if (!column.Type().SupportsRegularUpdate()) {
 			update.update_is_del_and_insert = true;
 			break;
 		}
@@ -314,6 +314,22 @@ void TableCatalogEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, L
 		}
 		BindExtraColumns(*this, get, proj, update, all_columns);
 	}
+}
+
+optional_ptr<Constraint> TableCatalogEntry::GetPrimaryKey() const {
+	for (const auto &constraint : GetConstraints()) {
+		if (constraint->type == ConstraintType::UNIQUE) {
+			auto &unique = constraint->Cast<UniqueConstraint>();
+			if (unique.IsPrimaryKey()) {
+				return &unique;
+			}
+		}
+	}
+	return nullptr;
+}
+
+bool TableCatalogEntry::HasPrimaryKey() const {
+	return GetPrimaryKey() != nullptr;
 }
 
 } // namespace duckdb

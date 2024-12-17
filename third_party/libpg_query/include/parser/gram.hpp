@@ -503,47 +503,48 @@
      VALUE_P = 719,
      VALUES = 720,
      VARCHAR = 721,
-     VARIADIC = 722,
-     VARYING = 723,
-     VERBOSE = 724,
-     VERSION_P = 725,
-     VIEW = 726,
-     VIEWS = 727,
-     VIRTUAL = 728,
-     VOLATILE = 729,
-     WEEK_P = 730,
-     WEEKS_P = 731,
-     WHEN = 732,
-     WHERE = 733,
-     WHITESPACE_P = 734,
-     WINDOW = 735,
-     WITH = 736,
-     WITHIN = 737,
-     WITHOUT = 738,
-     WORK = 739,
-     WRAPPER = 740,
-     WRITE_P = 741,
-     XML_P = 742,
-     XMLATTRIBUTES = 743,
-     XMLCONCAT = 744,
-     XMLELEMENT = 745,
-     XMLEXISTS = 746,
-     XMLFOREST = 747,
-     XMLNAMESPACES = 748,
-     XMLPARSE = 749,
-     XMLPI = 750,
-     XMLROOT = 751,
-     XMLSERIALIZE = 752,
-     XMLTABLE = 753,
-     YEAR_P = 754,
-     YEARS_P = 755,
-     YES_P = 756,
-     ZONE = 757,
-     NOT_LA = 758,
-     NULLS_LA = 759,
-     WITH_LA = 760,
-     POSTFIXOP = 761,
-     UMINUS = 762
+     VARIABLE_P = 722,
+     VARIADIC = 723,
+     VARYING = 724,
+     VERBOSE = 725,
+     VERSION_P = 726,
+     VIEW = 727,
+     VIEWS = 728,
+     VIRTUAL = 729,
+     VOLATILE = 730,
+     WEEK_P = 731,
+     WEEKS_P = 732,
+     WHEN = 733,
+     WHERE = 734,
+     WHITESPACE_P = 735,
+     WINDOW = 736,
+     WITH = 737,
+     WITHIN = 738,
+     WITHOUT = 739,
+     WORK = 740,
+     WRAPPER = 741,
+     WRITE_P = 742,
+     XML_P = 743,
+     XMLATTRIBUTES = 744,
+     XMLCONCAT = 745,
+     XMLELEMENT = 746,
+     XMLEXISTS = 747,
+     XMLFOREST = 748,
+     XMLNAMESPACES = 749,
+     XMLPARSE = 750,
+     XMLPI = 751,
+     XMLROOT = 752,
+     XMLSERIALIZE = 753,
+     XMLTABLE = 754,
+     YEAR_P = 755,
+     YEARS_P = 756,
+     YES_P = 757,
+     ZONE = 758,
+     NOT_LA = 759,
+     NULLS_LA = 760,
+     WITH_LA = 761,
+     POSTFIXOP = 762,
+     UMINUS = 763
    };
 #endif
 /* Tokens.  */
@@ -1011,47 +1012,48 @@
 #define VALUE_P 719
 #define VALUES 720
 #define VARCHAR 721
-#define VARIADIC 722
-#define VARYING 723
-#define VERBOSE 724
-#define VERSION_P 725
-#define VIEW 726
-#define VIEWS 727
-#define VIRTUAL 728
-#define VOLATILE 729
-#define WEEK_P 730
-#define WEEKS_P 731
-#define WHEN 732
-#define WHERE 733
-#define WHITESPACE_P 734
-#define WINDOW 735
-#define WITH 736
-#define WITHIN 737
-#define WITHOUT 738
-#define WORK 739
-#define WRAPPER 740
-#define WRITE_P 741
-#define XML_P 742
-#define XMLATTRIBUTES 743
-#define XMLCONCAT 744
-#define XMLELEMENT 745
-#define XMLEXISTS 746
-#define XMLFOREST 747
-#define XMLNAMESPACES 748
-#define XMLPARSE 749
-#define XMLPI 750
-#define XMLROOT 751
-#define XMLSERIALIZE 752
-#define XMLTABLE 753
-#define YEAR_P 754
-#define YEARS_P 755
-#define YES_P 756
-#define ZONE 757
-#define NOT_LA 758
-#define NULLS_LA 759
-#define WITH_LA 760
-#define POSTFIXOP 761
-#define UMINUS 762
+#define VARIABLE_P 722
+#define VARIADIC 723
+#define VARYING 724
+#define VERBOSE 725
+#define VERSION_P 726
+#define VIEW 727
+#define VIEWS 728
+#define VIRTUAL 729
+#define VOLATILE 730
+#define WEEK_P 731
+#define WEEKS_P 732
+#define WHEN 733
+#define WHERE 734
+#define WHITESPACE_P 735
+#define WINDOW 736
+#define WITH 737
+#define WITHIN 738
+#define WITHOUT 739
+#define WORK 740
+#define WRAPPER 741
+#define WRITE_P 742
+#define XML_P 743
+#define XMLATTRIBUTES 744
+#define XMLCONCAT 745
+#define XMLELEMENT 746
+#define XMLEXISTS 747
+#define XMLFOREST 748
+#define XMLNAMESPACES 749
+#define XMLPARSE 750
+#define XMLPI 751
+#define XMLROOT 752
+#define XMLSERIALIZE 753
+#define XMLTABLE 754
+#define YEAR_P 755
+#define YEARS_P 756
+#define YES_P 757
+#define ZONE 758
+#define NOT_LA 759
+#define NULLS_LA 760
+#define WITH_LA 761
+#define POSTFIXOP 762
+#define UMINUS 763
 
 
 
@@ -1110,7 +1112,7 @@ typedef union YYSTYPE
 	PGTransactionStmtType transactiontype;
 }
 /* Line 1529 of yacc.c.  */
-#line 1114 "third_party/libpg_query/grammar/grammar_out.hpp"
+#line 1116 "third_party/libpg_query/grammar/grammar_out.hpp"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1

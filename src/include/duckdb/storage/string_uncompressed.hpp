@@ -30,15 +30,27 @@ struct StringDictionaryContainer {
 	//! The end of the dictionary, which defaults to the block size.
 	uint32_t end;
 
-	void Verify() {
-		D_ASSERT(size <= Storage::BLOCK_SIZE);
-		D_ASSERT(end <= Storage::BLOCK_SIZE);
+	void Verify(const idx_t block_size) {
+		D_ASSERT(size <= block_size);
+		D_ASSERT(end <= block_size);
 		D_ASSERT(size <= end);
 	}
 };
 
 struct StringScanState : public SegmentScanState {
 	BufferHandle handle;
+};
+
+//===--------------------------------------------------------------------===//
+// Append
+//===--------------------------------------------------------------------===//
+struct SerializedStringSegmentState : public ColumnSegmentState {
+public:
+	SerializedStringSegmentState();
+	explicit SerializedStringSegmentState(vector<block_id_t> blocks_p);
+
+public:
+	void Serialize(Serializer &serializer) const override;
 };
 
 struct UncompressedStringStorage {
@@ -60,6 +72,9 @@ public:
 	static void StringScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result,
 	                              idx_t result_offset);
 	static void StringScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result);
+	static void Select(ColumnSegment &segment, ColumnScanState &state, idx_t vector_count, Vector &result,
+	                   const SelectionVector &sel, idx_t sel_count);
+
 	static void StringFetchRow(ColumnSegment &segment, ColumnFetchState &state, row_t row_id, Vector &result,
 	                           idx_t result_idx);
 	static unique_ptr<CompressedSegmentState> StringInitSegment(ColumnSegment &segment, block_id_t block_id,
@@ -117,7 +132,7 @@ public:
 			auto end = handle.Ptr() + *dictionary_end;
 
 #ifdef DEBUG
-			GetDictionary(segment, handle).Verify();
+			GetDictionary(segment, handle).Verify(segment.GetBlockManager().GetBlockSize());
 #endif
 			// Unknown string, continue
 			// non-null value, check if we can fit it within the block
@@ -126,7 +141,8 @@ public:
 			// determine whether or not we have space in the block for this string
 			bool use_overflow_block = false;
 			idx_t required_space = string_length;
-			if (DUCKDB_UNLIKELY(required_space >= StringUncompressed::STRING_BLOCK_LIMIT)) {
+			if (DUCKDB_UNLIKELY(required_space >=
+			                    StringUncompressed::GetStringBlockLimit(segment.GetBlockManager().GetBlockSize()))) {
 				// string exceeds block limit, store in overflow block and only write a marker here
 				required_space = BIG_STRING_MARKER_SIZE;
 				use_overflow_block = true;
@@ -157,7 +173,7 @@ public:
 				// note: for overflow strings we write negative value
 
 				// dictionary_size is an uint32_t value, so we can cast up.
-				D_ASSERT(NumericCast<idx_t>(*dictionary_size) <= Storage::BLOCK_SIZE);
+				D_ASSERT(NumericCast<idx_t>(*dictionary_size) <= segment.GetBlockManager().GetBlockSize());
 				result_data[target_idx] = -NumericCast<int32_t>((*dictionary_size));
 			} else {
 				// string fits in block, append to dictionary and increment dictionary position
@@ -169,13 +185,13 @@ public:
 				memcpy(dict_pos, source_data[source_idx].GetData(), string_length);
 
 				// dictionary_size is an uint32_t value, so we can cast up.
-				D_ASSERT(NumericCast<idx_t>(*dictionary_size) <= Storage::BLOCK_SIZE);
+				D_ASSERT(NumericCast<idx_t>(*dictionary_size) <= segment.GetBlockManager().GetBlockSize());
 				// Place the dictionary offset into the set of vectors.
 				result_data[target_idx] = NumericCast<int32_t>(*dictionary_size);
 			}
-			D_ASSERT(RemainingSpace(segment, handle) <= Storage::BLOCK_SIZE);
+			D_ASSERT(RemainingSpace(segment, handle) <= segment.GetBlockManager().GetBlockSize());
 #ifdef DEBUG
-			GetDictionary(segment, handle).Verify();
+			GetDictionary(segment, handle).Verify(segment.GetBlockManager().GetBlockSize());
 #endif
 		}
 		segment.count += count;
@@ -201,12 +217,25 @@ public:
 	static void WriteStringMarker(data_ptr_t target, block_id_t block_id, int32_t offset);
 	static void ReadStringMarker(data_ptr_t target, block_id_t &block_id, int32_t &offset);
 
-	static string_location_t FetchStringLocation(StringDictionaryContainer dict, data_ptr_t base_ptr,
-	                                             int32_t dict_offset, const idx_t block_size);
-	static string_t FetchStringFromDict(ColumnSegment &segment, StringDictionaryContainer dict, Vector &result,
-	                                    data_ptr_t base_ptr, int32_t dict_offset, uint32_t string_length);
-	static string_t FetchString(ColumnSegment &segment, StringDictionaryContainer dict, Vector &result,
-	                            data_ptr_t baseptr, string_location_t location, uint32_t string_length);
+	inline static string_t FetchStringFromDict(ColumnSegment &segment, StringDictionaryContainer dict, Vector &result,
+	                                           data_ptr_t base_ptr, int32_t dict_offset, uint32_t string_length) {
+		D_ASSERT(dict_offset <= NumericCast<int32_t>(segment.GetBlockManager().GetBlockSize()));
+		if (DUCKDB_LIKELY(dict_offset >= 0)) {
+			// regular string - fetch from dictionary
+			auto dict_end = base_ptr + dict.end;
+			auto dict_pos = dict_end - dict_offset;
+
+			auto str_ptr = char_ptr_cast(dict_pos);
+			return string_t(str_ptr, string_length);
+		} else {
+			// read overflow string
+			block_id_t block_id;
+			int32_t offset;
+			ReadStringMarker(base_ptr + dict.end - AbsValue<int32_t>(dict_offset), block_id, offset);
+
+			return ReadOverflowString(segment, result, block_id, offset);
+		}
+	}
 
 	static unique_ptr<ColumnSegmentState> SerializeState(ColumnSegment &segment);
 	static unique_ptr<ColumnSegmentState> DeserializeState(Deserializer &deserializer);

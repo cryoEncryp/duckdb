@@ -11,6 +11,7 @@
 #include "duckdb.hpp"
 #ifndef DUCKDB_AMALGAMATION
 #include "duckdb/common/common.hpp"
+#include "duckdb/common/encryption_state.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/mutex.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
@@ -18,8 +19,10 @@
 #include "duckdb/function/copy_function.hpp"
 #endif
 
+#include "parquet_statistics.hpp"
 #include "column_writer.hpp"
 #include "parquet_types.h"
+#include "geo_parquet.hpp"
 #include "thrift/protocol/TCompactProtocol.h"
 
 namespace duckdb {
@@ -31,7 +34,7 @@ class Serializer;
 class Deserializer;
 
 struct PreparedRowGroup {
-	duckdb_parquet::format::RowGroup row_group;
+	duckdb_parquet::RowGroup row_group;
 	vector<unique_ptr<ColumnWriterState>> states;
 	vector<shared_ptr<StringHeap>> heaps;
 };
@@ -59,13 +62,19 @@ struct FieldID {
 	static FieldID Deserialize(Deserializer &source);
 };
 
+struct ParquetBloomFilterEntry {
+	unique_ptr<ParquetBloomFilter> bloom_filter;
+	idx_t row_group_idx;
+	idx_t column_idx;
+};
+
 class ParquetWriter {
 public:
-	ParquetWriter(FileSystem &fs, string file_name, vector<LogicalType> types, vector<string> names,
-	              duckdb_parquet::format::CompressionCodec::type codec, ChildFieldIDs field_ids,
+	ParquetWriter(ClientContext &context, FileSystem &fs, string file_name, vector<LogicalType> types,
+	              vector<string> names, duckdb_parquet::CompressionCodec::type codec, ChildFieldIDs field_ids,
 	              const vector<pair<string, string>> &kv_metadata,
-	              shared_ptr<ParquetEncryptionConfig> encryption_config, double dictionary_compression_ratio_threshold,
-	              optional_idx compression_level);
+	              shared_ptr<ParquetEncryptionConfig> encryption_config, idx_t dictionary_size_limit,
+	              double bloom_filter_false_positive_ratio, int64_t compression_level, bool debug_use_openssl);
 
 public:
 	void PrepareRowGroup(ColumnDataCollection &buffer, PreparedRowGroup &result);
@@ -73,16 +82,16 @@ public:
 	void Flush(ColumnDataCollection &buffer);
 	void Finalize();
 
-	static duckdb_parquet::format::Type::type DuckDBTypeToParquetType(const LogicalType &duckdb_type);
-	static void SetSchemaProperties(const LogicalType &duckdb_type, duckdb_parquet::format::SchemaElement &schema_ele);
+	static duckdb_parquet::Type::type DuckDBTypeToParquetType(const LogicalType &duckdb_type);
+	static void SetSchemaProperties(const LogicalType &duckdb_type, duckdb_parquet::SchemaElement &schema_ele);
 
 	duckdb_apache::thrift::protocol::TProtocol *GetProtocol() {
 		return protocol.get();
 	}
-	duckdb_parquet::format::CompressionCodec::type GetCodec() {
+	duckdb_parquet::CompressionCodec::type GetCodec() {
 		return codec;
 	}
-	duckdb_parquet::format::Type::type GetType(idx_t schema_idx) {
+	duckdb_parquet::Type::type GetType(idx_t schema_idx) {
 		return file_meta_data.schema[schema_idx].type;
 	}
 	LogicalType GetSQLType(idx_t schema_idx) const {
@@ -95,10 +104,13 @@ public:
 		lock_guard<mutex> glock(lock);
 		return writer->total_written;
 	}
-	double DictionaryCompressionRatioThreshold() const {
-		return dictionary_compression_ratio_threshold;
+	idx_t DictionarySizeLimit() const {
+		return dictionary_size_limit;
 	}
-	optional_idx CompressionLevel() const {
+	double BloomFilterFalsePositiveRatio() const {
+		return bloom_filter_false_positive_ratio;
+	}
+	int64_t CompressionLevel() const {
 		return compression_level;
 	}
 	idx_t NumberOfRowGroups() {
@@ -106,29 +118,38 @@ public:
 		return file_meta_data.row_groups.size();
 	}
 
-	static CopyTypeSupport TypeIsSupported(const LogicalType &type);
-
 	uint32_t Write(const duckdb_apache::thrift::TBase &object);
 	uint32_t WriteData(const const_data_ptr_t buffer, const uint32_t buffer_size);
 
+	GeoParquetFileMetadata &GetGeoParquetData();
+
+	static bool TryGetParquetType(const LogicalType &duckdb_type,
+	                              optional_ptr<duckdb_parquet::Type::type> type = nullptr);
+
+	void BufferBloomFilter(idx_t col_idx, unique_ptr<ParquetBloomFilter> bloom_filter);
+
 private:
-	static CopyTypeSupport DuckDBTypeToParquetTypeInternal(const LogicalType &duckdb_type,
-	                                                       duckdb_parquet::format::Type::type &type);
 	string file_name;
 	vector<LogicalType> sql_types;
 	vector<string> column_names;
-	duckdb_parquet::format::CompressionCodec::type codec;
+	duckdb_parquet::CompressionCodec::type codec;
 	ChildFieldIDs field_ids;
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
-	double dictionary_compression_ratio_threshold;
-	optional_idx compression_level;
+	idx_t dictionary_size_limit;
+	double bloom_filter_false_positive_ratio;
+	int64_t compression_level;
+	bool debug_use_openssl;
+	shared_ptr<EncryptionUtil> encryption_util;
 
 	unique_ptr<BufferedFileWriter> writer;
 	std::shared_ptr<duckdb_apache::thrift::protocol::TProtocol> protocol;
-	duckdb_parquet::format::FileMetaData file_meta_data;
+	duckdb_parquet::FileMetaData file_meta_data;
 	std::mutex lock;
 
 	vector<unique_ptr<ColumnWriter>> column_writers;
+
+	unique_ptr<GeoParquetFileMetadata> geoparquet_data;
+	vector<ParquetBloomFilterEntry> bloom_filters;
 };
 
 } // namespace duckdb

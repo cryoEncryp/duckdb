@@ -60,15 +60,20 @@ public:
 	                                                         idx_t start, idx_t count, CompressionType compression_type,
 	                                                         BaseStatistics statistics,
 	                                                         unique_ptr<ColumnSegmentState> segment_state);
-	static unique_ptr<ColumnSegment> CreateTransientSegment(DatabaseInstance &db, const LogicalType &type,
-	                                                        const idx_t start,
-	                                                        const idx_t segment_size = Storage::BLOCK_SIZE);
+	static unique_ptr<ColumnSegment> CreateTransientSegment(DatabaseInstance &db, CompressionFunction &function,
+	                                                        const LogicalType &type, const idx_t start,
+	                                                        const idx_t segment_size, const idx_t block_size);
 
 public:
 	void InitializePrefetch(PrefetchState &prefetch_state, ColumnScanState &scan_state);
 	void InitializeScan(ColumnScanState &state);
 	//! Scan one vector from this segment
 	void Scan(ColumnScanState &state, idx_t scan_count, Vector &result, idx_t result_offset, ScanVectorType scan_type);
+	//! Scan a subset of a vector (defined by the selection vector)
+	void Select(ColumnScanState &state, idx_t scan_count, Vector &result, const SelectionVector &sel, idx_t sel_count);
+	//! Scan one vector while applying a filter to the vector, returning only the matching elements
+	void Filter(ColumnScanState &state, idx_t scan_count, Vector &result, SelectionVector &sel, idx_t &sel_count,
+	            const TableFilter &filter);
 	//! Fetch a value of the specific row id and append it to the result
 	void FetchRow(ColumnFetchState &state, row_t row_id, Vector &result, idx_t result_idx);
 
@@ -100,6 +105,8 @@ public:
 	//! Updates pointers to refer to the given block and offset. This is only used
 	//! when sharing a block among segments. This is invoked only AFTER the block is written.
 	void MarkAsPersistent(shared_ptr<BlockHandle> block, uint32_t offset_in_block);
+	//! Gets a data pointer from a persistent column segment
+	DataPointer GetDataPointer();
 
 	block_id_t GetBlockId() {
 		D_ASSERT(segment_type == ColumnSegmentType::PERSISTENT);

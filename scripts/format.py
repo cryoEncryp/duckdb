@@ -96,6 +96,7 @@ ignored_files = [
     'nf_zformat.h',
     'expr.cc',
     'function_list.cpp',
+    'inlined_grammar.hpp',
 ]
 ignored_directories = [
     '.eggs',
@@ -108,8 +109,6 @@ ignored_directories = [
     os.path.join('extension', 'tpcds', 'dsdgen'),
     os.path.join('extension', 'jemalloc', 'jemalloc'),
     os.path.join('extension', 'icu', 'third_party'),
-    os.path.join('src', 'include', 'duckdb', 'core_functions', 'aggregate'),
-    os.path.join('src', 'include', 'duckdb', 'core_functions', 'scalar'),
     os.path.join('tools', 'nodejs', 'src', 'duckdb'),
 ]
 format_all = False

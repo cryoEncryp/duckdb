@@ -208,7 +208,6 @@ void PhysicalRecursiveCTE::BuildPipelines(Pipeline &current, MetaPipeline &meta_
 		GatherColumnDataScans(*children[1], ops);
 	}
 
-
 	for (auto op : ops) {
 		auto entry = state.cte_dependencies.find(op);
 		if (entry == state.cte_dependencies.end()) {
@@ -225,12 +224,10 @@ vector<const_reference<PhysicalOperator>> PhysicalRecursiveCTE::GetSources() con
 	return {*this};
 }
 
-string PhysicalRecursiveCTE::ParamsToString() const {
-	string result = "";
-	result += "\n[INFOSEPARATOR]\n";
-	result += ctename;
-	result += "\n[INFOSEPARATOR]\n";
-	result += StringUtil::Format("idx: %llu", table_index);
+InsertionOrderPreservingMap<string> PhysicalRecursiveCTE::ParamsToString() const {
+	InsertionOrderPreservingMap<string> result;
+	result["CTE Name"] = ctename;
+	result["Table Index"] = StringUtil::Format("%llu", table_index);
 	return result;
 }
 

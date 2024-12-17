@@ -40,6 +40,24 @@ public:
 	uint64_t *GetValidity(idx_t col) {
 		return duckdb_vector_get_validity(GetVector(col));
 	}
+	duckdb_vector GetListChildVector(idx_t col) {
+		return duckdb_list_vector_get_child(GetVector(col));
+	}
+	void *GetListChildData(idx_t col) {
+		return duckdb_vector_get_data(GetListChildVector(col));
+	}
+	duckdb_vector GetStructChildVector(idx_t col, idx_t idx) {
+		return duckdb_struct_vector_get_child(GetVector(col), idx);
+	}
+	void *GetStructChildData(idx_t col, idx_t idx) {
+		return duckdb_vector_get_data(GetStructChildVector(col, idx));
+	}
+	duckdb_vector GetArrayChildVector(idx_t col) {
+		return duckdb_array_vector_get_child(GetVector(col));
+	}
+	void *GetArrayChildData(idx_t col) {
+		return duckdb_vector_get_data(GetArrayChildVector(col));
+	}
 	duckdb_data_chunk GetChunk() {
 		return chunk;
 	}
@@ -66,12 +84,14 @@ public:
 		success = (duckdb_query(connection, query.c_str(), &result) == DuckDBSuccess);
 		if (!success) {
 			REQUIRE(ErrorMessage() != nullptr);
+			REQUIRE(ErrorType() != DUCKDB_ERROR_INVALID);
 		}
 	}
 	void QueryPrepared(duckdb_prepared_statement statement) {
 		success = duckdb_execute_prepared(statement, &result) == DuckDBSuccess;
 		if (!success) {
 			REQUIRE(ErrorMessage() != nullptr);
+			REQUIRE(ErrorType() != DUCKDB_ERROR_INVALID);
 		}
 	}
 
@@ -97,6 +117,14 @@ public:
 
 	unique_ptr<CAPIDataChunk> FetchChunk(idx_t chunk_idx) {
 		auto chunk = duckdb_result_get_chunk(result, chunk_idx);
+		if (!chunk) {
+			return nullptr;
+		}
+		return make_uniq<CAPIDataChunk>(chunk);
+	}
+
+	unique_ptr<CAPIDataChunk> NextChunk() {
+		auto chunk = duckdb_fetch_chunk(result);
 		if (!chunk) {
 			return nullptr;
 		}
@@ -133,6 +161,9 @@ public:
 
 	const char *ErrorMessage() {
 		return duckdb_result_error(&result);
+	}
+	duckdb_error_type ErrorType() {
+		return duckdb_result_error_type(&result);
 	}
 
 	string ColumnName(idx_t col) {
@@ -181,6 +212,12 @@ template <>
 duckdb_time CAPIResult::Fetch(idx_t col, idx_t row);
 template <>
 duckdb_timestamp CAPIResult::Fetch(idx_t col, idx_t row);
+template <>
+duckdb_timestamp_s CAPIResult::Fetch(idx_t col, idx_t row);
+template <>
+duckdb_timestamp_ms CAPIResult::Fetch(idx_t col, idx_t row);
+template <>
+duckdb_timestamp_ns CAPIResult::Fetch(idx_t col, idx_t row);
 template <>
 duckdb_interval CAPIResult::Fetch(idx_t col, idx_t row);
 template <>

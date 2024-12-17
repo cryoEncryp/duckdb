@@ -6,6 +6,7 @@
 #include "duckdb/common/vector.hpp"
 #include "duckdb/function/scalar/nested_functions.hpp"
 #include "duckdb/function/cast/bound_cast_data.hpp"
+#include "duckdb/common/types/varint.hpp"
 
 namespace duckdb {
 
@@ -341,8 +342,8 @@ bool VectorStringToMap::StringToNestedTypeCastLoop(const string_t *source_data, 
 		vector_cast_data.all_converted = false;
 	}
 
-	auto &key_validity = FlatVector::Validity(result_key_child);
 	if (!vector_cast_data.all_converted) {
+		auto &key_validity = FlatVector::Validity(result_key_child);
 		for (idx_t row_idx = 0; row_idx < count; row_idx++) {
 			if (!result_mask.RowIsValid(row_idx)) {
 				continue;
@@ -515,6 +516,8 @@ BoundCastInfo DefaultCasts::StringCastSwitch(BindCastInput &input, const Logical
 		                     MapBoundCastData::BindMapToMapCast(
 		                         input, LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR), target),
 		                     InitMapCastLocalState);
+	case LogicalTypeId::VARINT:
+		return BoundCastInfo(&VectorCastHelpers::TryCastStringLoop<string_t, string_t, TryCastToVarInt>);
 	default:
 		return VectorStringCastNumericSwitch(input, source, target);
 	}

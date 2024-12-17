@@ -23,7 +23,7 @@ public:
 
 PhysicalTableInOutFunction::PhysicalTableInOutFunction(vector<LogicalType> types, TableFunction function_p,
                                                        unique_ptr<FunctionData> bind_data_p,
-                                                       vector<column_t> column_ids_p, idx_t estimated_cardinality,
+                                                       vector<ColumnIndex> column_ids_p, idx_t estimated_cardinality,
                                                        vector<column_t> project_input_p)
     : PhysicalOperator(PhysicalOperatorType::INOUT_FUNCTION, std::move(types), estimated_cardinality),
       function(std::move(function_p)), bind_data(std::move(bind_data_p)), column_ids(std::move(column_ids_p)),
@@ -108,15 +108,18 @@ OperatorResultType PhysicalTableInOutFunction::Execute(ExecutionContext &context
 	return OperatorResultType::HAVE_MORE_OUTPUT;
 }
 
-string PhysicalTableInOutFunction::ParamsToString() const {
-	string result;
+InsertionOrderPreservingMap<string> PhysicalTableInOutFunction::ParamsToString() const {
+	InsertionOrderPreservingMap<string> result;
 	if (function.to_string) {
-		result = function.to_string(bind_data.get());
+		TableFunctionToStringInput input(function, bind_data.get());
+		auto to_string_result = function.to_string(input);
+		for (const auto &it : to_string_result) {
+			result[it.first] = it.second;
+		}
 	} else {
-		result += function.name;
+		result["Name"] = function.name;
 	}
-	result += "\n[INFOSEPARATOR]\n";
-	result += StringUtil::Format("EC: %llu", estimated_cardinality);
+	SetEstimatedCardinality(result, estimated_cardinality);
 	return result;
 }
 

@@ -118,6 +118,9 @@ bool Binder::BindTableFunctionParameters(TableFunctionCatalogEntry &table_functi
 					child = std::move(comp.right);
 				}
 			}
+		} else if (!child->alias.empty()) {
+			// <name> => <expression> will set the alias of <expression> to <name>
+			parameter_name = child->alias;
 		}
 		if (bind_type == TableFunctionBindType::TABLE_PARAMETER_FUNCTION && child->type == ExpressionType::SUBQUERY) {
 			D_ASSERT(table_function.functions.Size() == 1);
@@ -234,13 +237,12 @@ unique_ptr<LogicalOperator> Binder::BindTableFunctionInternal(TableFunction &tab
 	get->input_table_types = input_table_types;
 	get->input_table_names = input_table_names;
 	if (table_function.in_out_function && !table_function.projection_pushdown) {
-		get->column_ids.reserve(return_types.size());
 		for (idx_t i = 0; i < return_types.size(); i++) {
-			get->column_ids.push_back(i);
+			get->AddColumnId(i);
 		}
 	}
 	// now add the table function to the bind context so its columns can be bound
-	bind_context.AddTableFunction(bind_index, function_name, return_names, return_types, get->column_ids,
+	bind_context.AddTableFunction(bind_index, function_name, return_names, return_types, get->GetMutableColumnIds(),
 	                              get->GetTable().get());
 	return std::move(get);
 }
@@ -263,9 +265,13 @@ unique_ptr<BoundTableRef> Binder::Bind(TableFunctionRef &ref) {
 	D_ASSERT(ref.function->type == ExpressionType::FUNCTION);
 	auto &fexpr = ref.function->Cast<FunctionExpression>();
 
+	string catalog = fexpr.catalog;
+	string schema = fexpr.schema;
+	Binder::BindSchemaOrCatalog(context, catalog, schema);
+
 	// fetch the function from the catalog
-	auto &func_catalog = *GetCatalogEntry(CatalogType::TABLE_FUNCTION_ENTRY, fexpr.catalog, fexpr.schema,
-	                                      fexpr.function_name, OnEntryNotFound::THROW_EXCEPTION, error_context);
+	auto &func_catalog = *GetCatalogEntry(CatalogType::TABLE_FUNCTION_ENTRY, catalog, schema, fexpr.function_name,
+	                                      OnEntryNotFound::THROW_EXCEPTION, error_context);
 
 	if (func_catalog.type == CatalogType::TABLE_MACRO_ENTRY) {
 		auto &macro_func = func_catalog.Cast<TableMacroCatalogEntry>();
@@ -304,7 +310,7 @@ unique_ptr<BoundTableRef> Binder::Bind(TableFunctionRef &ref) {
 	}
 
 	// select the function based on the input parameters
-	FunctionBinder function_binder(context);
+	FunctionBinder function_binder(*this);
 	auto best_function_idx = function_binder.BindFunction(function.name, function.functions, arguments, error);
 	if (!best_function_idx.IsValid()) {
 		error.AddQueryLocation(ref);

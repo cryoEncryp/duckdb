@@ -17,6 +17,7 @@
 #include "duckdb/storage/table/column_segment_tree.hpp"
 #include "duckdb/common/mutex.hpp"
 #include "duckdb/common/enums/scan_vector_type.hpp"
+#include "duckdb/common/serializer/serialization_traits.hpp"
 
 namespace duckdb {
 class ColumnData;
@@ -31,6 +32,7 @@ struct PrefetchState;
 struct RowGroupWriteInfo;
 struct TableScanOptions;
 struct TransactionData;
+struct PersistentColumnData;
 
 struct ColumnCheckpointInfo {
 	ColumnCheckpointInfo(RowGroupWriteInfo &info, idx_t column_idx) : info(info), column_idx(column_idx) {
@@ -67,7 +69,7 @@ public:
 	optional_ptr<ColumnData> parent;
 
 public:
-	virtual bool CheckZonemap(ColumnScanState &state, TableFilter &filter) = 0;
+	virtual FilterPropagateResult CheckZonemap(ColumnScanState &state, TableFilter &filter);
 
 	BlockManager &GetBlockManager() {
 		return block_manager;
@@ -86,7 +88,7 @@ public:
 	//! Whether or not the column has any updates
 	bool HasUpdates() const;
 	//! Whether or not we can scan an entire vector
-	virtual ScanVectorType GetVectorScanType(ColumnScanState &state, idx_t scan_count);
+	virtual ScanVectorType GetVectorScanType(ColumnScanState &state, idx_t scan_count, Vector &result);
 
 	//! Initialize prefetch state with required I/O data for the next N rows
 	virtual void InitializePrefetch(PrefetchState &prefetch_state, ColumnScanState &scan_state, idx_t rows);
@@ -106,12 +108,12 @@ public:
 	virtual idx_t ScanCount(ColumnScanState &state, Vector &result, idx_t count);
 
 	//! Select
-	virtual void Select(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
+	virtual void Filter(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
 	                    SelectionVector &sel, idx_t &count, const TableFilter &filter);
-	virtual void FilterScan(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
-	                        SelectionVector &sel, idx_t count);
-	virtual void FilterScanCommitted(idx_t vector_index, ColumnScanState &state, Vector &result, SelectionVector &sel,
-	                                 idx_t count, bool allow_updates);
+	virtual void Select(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
+	                    SelectionVector &sel, idx_t count);
+	virtual void SelectCommitted(idx_t vector_index, ColumnScanState &state, Vector &result, SelectionVector &sel,
+	                             idx_t count, bool allow_updates);
 
 	//! Skip the scan forward by "count" rows
 	virtual void Skip(ColumnScanState &state, idx_t count = STANDARD_VECTOR_SIZE);
@@ -147,14 +149,19 @@ public:
 	virtual void CheckpointScan(ColumnSegment &segment, ColumnScanState &state, idx_t row_group_start, idx_t count,
 	                            Vector &scan_vector);
 
-	virtual void DeserializeColumn(Deserializer &deserializer, BaseStatistics &target_stats);
+	virtual bool IsPersistent();
+	vector<DataPointer> GetDataPointers();
+
+	virtual PersistentColumnData Serialize();
+	void InitializeColumn(PersistentColumnData &column_data);
+	virtual void InitializeColumn(PersistentColumnData &column_data, BaseStatistics &target_stats);
 	static shared_ptr<ColumnData> Deserialize(BlockManager &block_manager, DataTableInfo &info, idx_t column_index,
 	                                          idx_t start_row, ReadStream &source, const LogicalType &type);
 
 	virtual void GetColumnSegmentInfo(idx_t row_group_index, vector<idx_t> col_path, vector<ColumnSegmentInfo> &result);
 	virtual void Verify(RowGroup &parent);
 
-	bool CheckZonemap(TableFilter &filter);
+	FilterPropagateResult CheckZonemap(TableFilter &filter);
 
 	static shared_ptr<ColumnData> CreateColumn(BlockManager &block_manager, DataTableInfo &info, idx_t column_index,
 	                                           idx_t start_row, const LogicalType &type,
@@ -170,14 +177,20 @@ public:
 protected:
 	//! Append a transient segment
 	void AppendTransientSegment(SegmentLock &l, idx_t start_row);
+	void AppendSegment(SegmentLock &l, unique_ptr<ColumnSegment> segment);
 
+	void BeginScanVectorInternal(ColumnScanState &state);
 	//! Scans a base vector from the column
 	idx_t ScanVector(ColumnScanState &state, Vector &result, idx_t remaining, ScanVectorType scan_type);
 	//! Scans a vector from the column merged with any potential updates
-	//! If ALLOW_UPDATES is set to false, the function will instead throw an exception if any updates are found
-	template <bool SCAN_COMMITTED, bool ALLOW_UPDATES>
 	idx_t ScanVector(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
-	                 idx_t target_scan);
+	                 idx_t target_scan, ScanVectorType scan_type, ScanVectorMode mode);
+	idx_t ScanVector(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result,
+	                 idx_t target_scan, ScanVectorMode mode);
+	void SelectVector(ColumnScanState &state, Vector &result, idx_t target_count, const SelectionVector &sel,
+	                  idx_t sel_count);
+	void FilterVector(ColumnScanState &state, Vector &result, idx_t target_count, SelectionVector &sel,
+	                  idx_t &sel_count, const TableFilter &filter);
 
 	void ClearUpdates();
 	void FetchUpdates(TransactionData transaction, idx_t vector_index, Vector &result, idx_t scan_count,
@@ -187,6 +200,9 @@ protected:
 	                    idx_t update_count, Vector &base_vector);
 
 	idx_t GetVectorCount(idx_t vector_index) const;
+
+private:
+	void UpdateCompressionFunction(SegmentLock &l, CompressionFunction &function);
 
 protected:
 	//! The segments holding the data of this column segment
@@ -201,6 +217,70 @@ protected:
 	unique_ptr<SegmentStatistics> stats;
 	//! Total transient allocation size
 	idx_t allocation_size;
+	//!	The compression function used by the ColumnData
+	//! This is empty if the segments have mixed compression or the ColumnData is empty
+	optional_ptr<CompressionFunction> compression;
+};
+
+struct PersistentColumnData {
+	explicit PersistentColumnData(PhysicalType physical_type);
+	PersistentColumnData(PhysicalType physical_type, vector<DataPointer> pointers);
+	// disable copy constructors
+	PersistentColumnData(const PersistentColumnData &other) = delete;
+	PersistentColumnData &operator=(const PersistentColumnData &) = delete;
+	//! enable move constructors
+	PersistentColumnData(PersistentColumnData &&other) noexcept = default;
+	PersistentColumnData &operator=(PersistentColumnData &&) = default;
+	~PersistentColumnData();
+
+	PhysicalType physical_type;
+	vector<DataPointer> pointers;
+	vector<PersistentColumnData> child_columns;
+	bool has_updates = false;
+
+	void Serialize(Serializer &serializer) const;
+	static PersistentColumnData Deserialize(Deserializer &deserializer);
+	void DeserializeField(Deserializer &deserializer, field_id_t field_idx, const char *field_name,
+	                      const LogicalType &type);
+	bool HasUpdates() const;
+};
+
+struct PersistentRowGroupData {
+	explicit PersistentRowGroupData(vector<LogicalType> types);
+	PersistentRowGroupData() = default;
+	// disable copy constructors
+	PersistentRowGroupData(const PersistentRowGroupData &other) = delete;
+	PersistentRowGroupData &operator=(const PersistentRowGroupData &) = delete;
+	//! enable move constructors
+	PersistentRowGroupData(PersistentRowGroupData &&other) noexcept = default;
+	PersistentRowGroupData &operator=(PersistentRowGroupData &&) = default;
+	~PersistentRowGroupData() = default;
+
+	vector<LogicalType> types;
+	vector<PersistentColumnData> column_data;
+	idx_t start;
+	idx_t count;
+
+	void Serialize(Serializer &serializer) const;
+	static PersistentRowGroupData Deserialize(Deserializer &deserializer);
+	bool HasUpdates() const;
+};
+
+struct PersistentCollectionData {
+	PersistentCollectionData() = default;
+	// disable copy constructors
+	PersistentCollectionData(const PersistentCollectionData &other) = delete;
+	PersistentCollectionData &operator=(const PersistentCollectionData &) = delete;
+	//! enable move constructors
+	PersistentCollectionData(PersistentCollectionData &&other) noexcept = default;
+	PersistentCollectionData &operator=(PersistentCollectionData &&) = default;
+	~PersistentCollectionData() = default;
+
+	vector<PersistentRowGroupData> row_group_data;
+
+	void Serialize(Serializer &serializer) const;
+	static PersistentCollectionData Deserialize(Deserializer &deserializer);
+	bool HasUpdates() const;
 };
 
 } // namespace duckdb

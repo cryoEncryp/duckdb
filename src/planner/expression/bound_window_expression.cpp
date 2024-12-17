@@ -64,6 +64,16 @@ bool BoundWindowExpression::Equals(const BaseExpression &other_p) const {
 		return false;
 	}
 
+	// check if the argument orderings are equivalent
+	if (arg_orders.size() != other.arg_orders.size()) {
+		return false;
+	}
+	for (idx_t i = 0; i < arg_orders.size(); i++) {
+		if (!arg_orders[i].Equals(other.arg_orders[i])) {
+			return false;
+		}
+	}
+
 	// check if the framing expressions are equivalent
 	if (!Expression::Equals(start_expr, other.start_expr) || !Expression::Equals(end_expr, other.end_expr) ||
 	    !Expression::Equals(offset_expr, other.offset_expr) || !Expression::Equals(default_expr, other.default_expr)) {
@@ -120,7 +130,7 @@ bool BoundWindowExpression::KeysAreCompatible(const BoundWindowExpression &other
 	return true;
 }
 
-unique_ptr<Expression> BoundWindowExpression::Copy() {
+unique_ptr<Expression> BoundWindowExpression::Copy() const {
 	auto new_window = make_uniq<BoundWindowExpression>(type, return_type, nullptr, nullptr);
 	new_window->CopyProperties(*this);
 
@@ -145,6 +155,10 @@ unique_ptr<Expression> BoundWindowExpression::Copy() {
 	}
 	for (auto &o : orders) {
 		new_window->orders.emplace_back(o.type, o.null_order, o.expression->Copy());
+	}
+
+	for (auto &o : arg_orders) {
+		new_window->arg_orders.emplace_back(o.type, o.null_order, o.expression->Copy());
 	}
 
 	new_window->filter_expr = filter_expr ? filter_expr->Copy() : nullptr;
@@ -189,6 +203,7 @@ void BoundWindowExpression::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault(211, "default_expr", default_expr, unique_ptr<Expression>());
 	serializer.WriteProperty(212, "exclude_clause", exclude_clause);
 	serializer.WriteProperty(213, "distinct", distinct);
+	serializer.WriteProperty(214, "arg_orders", arg_orders);
 }
 
 unique_ptr<Expression> BoundWindowExpression::Deserialize(Deserializer &deserializer) {
@@ -208,16 +223,17 @@ unique_ptr<Expression> BoundWindowExpression::Deserialize(Deserializer &deserial
 	result->children = std::move(children);
 	deserializer.ReadProperty(202, "partitions", result->partitions);
 	deserializer.ReadProperty(203, "orders", result->orders);
-	deserializer.ReadPropertyWithDefault(204, "filters", result->filter_expr, unique_ptr<Expression>());
+	deserializer.ReadPropertyWithExplicitDefault(204, "filters", result->filter_expr, unique_ptr<Expression>());
 	deserializer.ReadProperty(205, "ignore_nulls", result->ignore_nulls);
 	deserializer.ReadProperty(206, "start", result->start);
 	deserializer.ReadProperty(207, "end", result->end);
-	deserializer.ReadPropertyWithDefault(208, "start_expr", result->start_expr, unique_ptr<Expression>());
-	deserializer.ReadPropertyWithDefault(209, "end_expr", result->end_expr, unique_ptr<Expression>());
-	deserializer.ReadPropertyWithDefault(210, "offset_expr", result->offset_expr, unique_ptr<Expression>());
-	deserializer.ReadPropertyWithDefault(211, "default_expr", result->default_expr, unique_ptr<Expression>());
+	deserializer.ReadPropertyWithExplicitDefault(208, "start_expr", result->start_expr, unique_ptr<Expression>());
+	deserializer.ReadPropertyWithExplicitDefault(209, "end_expr", result->end_expr, unique_ptr<Expression>());
+	deserializer.ReadPropertyWithExplicitDefault(210, "offset_expr", result->offset_expr, unique_ptr<Expression>());
+	deserializer.ReadPropertyWithExplicitDefault(211, "default_expr", result->default_expr, unique_ptr<Expression>());
 	deserializer.ReadProperty(212, "exclude_clause", result->exclude_clause);
 	deserializer.ReadProperty(213, "distinct", result->distinct);
+	deserializer.ReadProperty(214, "arg_orders", result->arg_orders);
 	return std::move(result);
 }
 

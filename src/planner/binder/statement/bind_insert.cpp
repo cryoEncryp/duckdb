@@ -148,7 +148,6 @@ void ReplaceColumnBindings(Expression &expr, idx_t source, idx_t dest) {
 void Binder::BindDoUpdateSetExpressions(const string &table_alias, LogicalInsert &insert, UpdateSetInfo &set_info,
                                         TableCatalogEntry &table, TableStorageInfo &storage_info) {
 	D_ASSERT(insert.children.size() == 1);
-	D_ASSERT(insert.children[0]->type == LogicalOperatorType::LOGICAL_PROJECTION);
 
 	vector<column_t> logical_column_ids;
 	vector<string> column_names;
@@ -168,6 +167,11 @@ void Binder::BindDoUpdateSetExpressions(const string &table_alias, LogicalInsert
 		    insert.set_columns.end()) {
 			throw BinderException("Multiple assignments to same column \"%s\"", colname);
 		}
+
+		if (!column.Type().SupportsRegularUpdate()) {
+			insert.update_is_del_and_insert = true;
+		}
+
 		insert.set_columns.push_back(column.Physical());
 		logical_column_ids.push_back(column.Oid());
 		insert.set_types.push_back(column.Type());
@@ -197,12 +201,13 @@ void Binder::BindDoUpdateSetExpressions(const string &table_alias, LogicalInsert
 		}
 	}
 
-	// Verify that none of the columns that are targeted with a SET expression are indexed on
+	// If any column targeted by a SET expression has an index, then
+	// we need to rewrite this to an DELETE + INSERT.
 	for (idx_t i = 0; i < logical_column_ids.size(); i++) {
 		auto &column = logical_column_ids[i];
 		if (indexed_columns.count(column)) {
-			throw BinderException("Can not assign to column '%s' because it has a UNIQUE/PRIMARY KEY constraint",
-			                      column_names[i]);
+			insert.update_is_del_and_insert = true;
+			break;
 		}
 	}
 }
@@ -250,6 +255,15 @@ unique_ptr<UpdateSetInfo> CreateSetInfoForReplace(TableCatalogEntry &table, Inse
 	return set_info;
 }
 
+vector<column_t> GetColumnsToFetch(const TableBinding &binding) {
+	auto &bound_columns = binding.GetBoundColumnIds();
+	vector<column_t> result;
+	for (auto &col : bound_columns) {
+		result.push_back(col.GetPrimaryIndex());
+	}
+	return result;
+}
+
 void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &table, InsertStatement &stmt) {
 	if (!stmt.on_conflict_info) {
 		insert.action_type = OnConflictAction::THROW;
@@ -294,7 +308,7 @@ void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &tabl
 			auto entry = specified_columns.find(col.Name());
 			if (entry != specified_columns.end()) {
 				// column was specified, set to the index
-				insert.on_conflict_filter.insert(col.Oid());
+				insert.on_conflict_filter.insert(col.Physical().index);
 			}
 		}
 		bool index_references_columns = false;
@@ -311,8 +325,8 @@ void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &tabl
 		if (!index_references_columns) {
 			// Same as before, this is essentially a no-op, turning this into a DO THROW instead
 			// But since this makes no logical sense, it's probably better to throw an error
-			throw BinderException(
-			    "The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY CONSTRAINT");
+			throw BinderException("The specified columns as conflict target are not referenced by a UNIQUE/PRIMARY KEY "
+			                      "CONSTRAINT or INDEX");
 		}
 	} else {
 		// When omitting the conflict target, the ON CONFLICT applies to every UNIQUE/PRIMARY KEY on the table
@@ -352,8 +366,12 @@ void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &tabl
 	// add a bind context entry for it
 	auto excluded_index = GenerateTableIndex();
 	insert.excluded_table_index = excluded_index;
-	auto table_column_names = columns.GetColumnNames();
-	auto table_column_types = columns.GetColumnTypes();
+	vector<string> table_column_names;
+	vector<LogicalType> table_column_types;
+	for (auto &col : columns.Physical()) {
+		table_column_names.push_back(col.Name());
+		table_column_types.push_back(col.Type());
+	}
 	bind_context.AddGenericBinding(excluded_index, "excluded", table_column_names, table_column_types);
 
 	if (on_conflict.condition) {
@@ -417,7 +435,7 @@ void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &tabl
 		// of the original table, to execute the expressions
 		D_ASSERT(original_binding->binding_type == BindingType::TABLE);
 		auto &table_binding = original_binding->Cast<TableBinding>();
-		insert.columns_to_fetch = table_binding.GetBoundColumnIds();
+		insert.columns_to_fetch = GetColumnsToFetch(table_binding);
 		return;
 	}
 
@@ -443,7 +461,7 @@ void Binder::BindOnConflictClause(LogicalInsert &insert, TableCatalogEntry &tabl
 	// of the original table, to execute the expressions
 	D_ASSERT(original_binding->binding_type == BindingType::TABLE);
 	auto &table_binding = original_binding->Cast<TableBinding>();
-	insert.columns_to_fetch = table_binding.GetBoundColumnIds();
+	insert.columns_to_fetch = GetColumnsToFetch(table_binding);
 
 	// Replace the column bindings to refer to the child operator
 	for (auto &expr : insert.expressions) {
@@ -466,7 +484,7 @@ BoundStatement Binder::Bind(InsertStatement &stmt) {
 	if (!table.temporary) {
 		// inserting into a non-temporary table: alters underlying database
 		auto &properties = GetStatementProperties();
-		properties.modified_databases.insert(table.catalog.GetName());
+		properties.RegisterDBModify(table.catalog, context);
 	}
 
 	auto insert = make_uniq<LogicalInsert>(table, GenerateTableIndex());
@@ -480,6 +498,9 @@ BoundStatement Binder::Bind(InsertStatement &stmt) {
 	if (stmt.column_order == InsertColumnOrder::INSERT_BY_NAME) {
 		if (values_list) {
 			throw BinderException("INSERT BY NAME can only be used when inserting from a SELECT statement");
+		}
+		if (stmt.default_values) {
+			throw BinderException("INSERT BY NAME cannot be combined with with DEFAULT VALUES");
 		}
 		if (!stmt.columns.empty()) {
 			throw BinderException("INSERT BY NAME cannot be combined with an explicit column list");
@@ -535,7 +556,9 @@ BoundStatement Binder::Bind(InsertStatement &stmt) {
 	}
 
 	// bind the default values
-	BindDefaultValues(table.GetColumns(), insert->bound_defaults);
+	auto &catalog_name = table.ParentCatalog().GetName();
+	auto &schema_name = table.ParentSchema().name;
+	BindDefaultValues(table.GetColumns(), insert->bound_defaults, catalog_name, schema_name);
 	insert->bound_constraints = BindConstraints(table);
 	if (!stmt.select_statement && !stmt.default_values) {
 		result.plan = std::move(insert);

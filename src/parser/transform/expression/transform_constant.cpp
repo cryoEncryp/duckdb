@@ -55,6 +55,12 @@ unique_ptr<ConstantExpression> Transformer::TransformValue(duckdb_libpgquery::PG
 				// successfully cast to bigint: bigint value
 				return make_uniq<ConstantExpression>(Value::HUGEINT(hugeint_value));
 			}
+			uhugeint_t uhugeint_value;
+			// if that is not successful; try to cast as uhugeint
+			if (TryCast::Operation<string_t, uhugeint_t>(str_val, uhugeint_value)) {
+				// successfully cast to bigint: bigint value
+				return make_uniq<ConstantExpression>(Value::UHUGEINT(uhugeint_value));
+			}
 		}
 		idx_t decimal_offset = val.val.str[0] == '-' ? 3 : 2;
 		if (try_cast_as_decimal && decimal_position.IsValid() &&
@@ -129,6 +135,23 @@ bool Transformer::ConstructConstantFromExpression(const ParsedExpression &expr, 
 
 			// finally create the list
 			value = Value::LIST(child_type, values);
+			return true;
+		} else if (function.function_name == "map") {
+			Value keys;
+			if (!ConstructConstantFromExpression(*function.children[0], keys)) {
+				return false;
+			}
+
+			Value values;
+			if (!ConstructConstantFromExpression(*function.children[1], values)) {
+				return false;
+			}
+
+			vector<Value> keys_unpacked = ListValue::GetChildren(keys);
+			vector<Value> values_unpacked = ListValue::GetChildren(values);
+
+			value = Value::MAP(ListType::GetChildType(keys.type()), ListType::GetChildType(values.type()),
+			                   keys_unpacked, values_unpacked);
 			return true;
 		} else {
 			return false;

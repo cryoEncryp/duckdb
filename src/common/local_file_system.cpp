@@ -6,7 +6,7 @@
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/windows.hpp"
-#include "duckdb/function/scalar/string_functions.hpp"
+#include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/database.hpp"
 
@@ -129,7 +129,8 @@ bool LocalFileSystem::IsPipe(const string &filename, optional_ptr<FileOpener> op
 
 struct UnixFileHandle : public FileHandle {
 public:
-	UnixFileHandle(FileSystem &file_system, string path, int fd) : FileHandle(file_system, std::move(path)), fd(fd) {
+	UnixFileHandle(FileSystem &file_system, string path, int fd, FileOpenFlags flags)
+	    : FileHandle(file_system, std::move(path), flags), fd(fd) {
 	}
 	~UnixFileHandle() override {
 		UnixFileHandle::Close();
@@ -318,9 +319,8 @@ unique_ptr<FileHandle> LocalFileSystem::OpenFile(const string &path_p, FileOpenF
 #endif
 #if defined(__DARWIN__) || defined(__APPLE__) || defined(__OpenBSD__)
 		// OSX does not have O_DIRECT, instead we need to use fcntl afterwards to support direct IO
-		open_flags |= O_SYNC;
 #else
-		open_flags |= O_DIRECT | O_SYNC;
+		open_flags |= O_DIRECT;
 #endif
 	}
 
@@ -333,6 +333,10 @@ unique_ptr<FileHandle> LocalFileSystem::OpenFile(const string &path_p, FileOpenF
 		filesec = 0666;
 	}
 
+	if (flags.ExclusiveCreate()) {
+		open_flags |= O_EXCL;
+	}
+
 	// Open the file
 	int fd = open(path.c_str(), open_flags, filesec);
 
@@ -340,17 +344,22 @@ unique_ptr<FileHandle> LocalFileSystem::OpenFile(const string &path_p, FileOpenF
 		if (flags.ReturnNullIfNotExists() && errno == ENOENT) {
 			return nullptr;
 		}
+		if (flags.ReturnNullIfExists() && errno == EEXIST) {
+			return nullptr;
+		}
 		throw IOException("Cannot open file \"%s\": %s", {{"errno", std::to_string(errno)}}, path, strerror(errno));
 	}
-	// #if defined(__DARWIN__) || defined(__APPLE__)
-	// 	if (flags & FileFlags::FILE_FLAGS_DIRECT_IO) {
-	// 		// OSX requires fcntl for Direct IO
-	// 		rc = fcntl(fd, F_NOCACHE, 1);
-	// 		if (fd == -1) {
-	// 			throw IOException("Could not enable direct IO for file \"%s\": %s", path, strerror(errno));
-	// 		}
-	// 	}
-	// #endif
+
+#if defined(__DARWIN__) || defined(__APPLE__)
+	if (flags.DirectIO()) {
+		// OSX requires fcntl for Direct IO
+		rc = fcntl(fd, F_NOCACHE, 1);
+		if (rc == -1) {
+			throw IOException("Could not enable direct IO for file \"%s\": %s", path, strerror(errno));
+		}
+	}
+#endif
+
 	if (flags.Lock() != FileLockType::NO_LOCK) {
 		// set lock on file
 		// but only if it is not an input/output stream
@@ -365,36 +374,52 @@ unique_ptr<FileHandle> LocalFileSystem::OpenFile(const string &path_p, FileOpenF
 			rc = fcntl(fd, F_SETLK, &fl);
 			// Retain the original error.
 			int retained_errno = errno;
-			if (rc == -1) {
-				string message;
-				// try to find out who is holding the lock using F_GETLK
-				rc = fcntl(fd, F_GETLK, &fl);
-				if (rc == -1) { // fnctl does not want to help us
-					message = strerror(errno);
-				} else {
-					message = AdditionalProcessInfo(*this, fl.l_pid);
+			bool has_error = rc == -1;
+			string extended_error;
+			if (has_error) {
+				if (retained_errno == ENOTSUP) {
+					// file lock not supported for this file system
+					if (flags.Lock() == FileLockType::READ_LOCK) {
+						// for read-only, we ignore not-supported errors
+						has_error = false;
+						errno = 0;
+					} else {
+						extended_error = "File locks are not supported for this file system, cannot open the file in "
+						                 "read-write mode. Try opening the file in read-only mode";
+					}
 				}
-
-				if (flags.Lock() == FileLockType::WRITE_LOCK) {
-					// maybe we can get a read lock instead and tell this to the user.
-					fl.l_type = F_RDLCK;
-					rc = fcntl(fd, F_SETLK, &fl);
-					if (rc != -1) { // success!
-						message += ". However, you would be able to open this database in read-only mode, e.g. by "
-						           "using the -readonly parameter in the CLI";
+			}
+			if (has_error) {
+				if (extended_error.empty()) {
+					// try to find out who is holding the lock using F_GETLK
+					rc = fcntl(fd, F_GETLK, &fl);
+					if (rc == -1) { // fnctl does not want to help us
+						extended_error = strerror(errno);
+					} else {
+						extended_error = AdditionalProcessInfo(*this, fl.l_pid);
+					}
+					if (flags.Lock() == FileLockType::WRITE_LOCK) {
+						// maybe we can get a read lock instead and tell this to the user.
+						fl.l_type = F_RDLCK;
+						rc = fcntl(fd, F_SETLK, &fl);
+						if (rc != -1) { // success!
+							extended_error +=
+							    ". However, you would be able to open this database in read-only mode, e.g. by "
+							    "using the -readonly parameter in the CLI";
+						}
 					}
 				}
 				rc = close(fd);
 				if (rc == -1) {
-					message += ". Also, failed closing file";
+					extended_error += ". Also, failed closing file";
 				}
-				message += ". See also https://duckdb.org/docs/connect/concurrency";
+				extended_error += ". See also https://duckdb.org/docs/connect/concurrency";
 				throw IOException("Could not set lock on file \"%s\": %s", {{"errno", std::to_string(retained_errno)}},
-				                  path, message);
+				                  path, extended_error);
 			}
 		}
 	}
-	return make_uniq<UnixFileHandle>(*this, path, fd);
+	return make_uniq<UnixFileHandle>(*this, path, fd, flags);
 }
 
 void LocalFileSystem::SetFilePointer(FileHandle &handle, idx_t location) {
@@ -491,7 +516,8 @@ bool LocalFileSystem::Trim(FileHandle &handle, idx_t offset_bytes, idx_t length_
 	return false;
 #else
 	int fd = handle.Cast<UnixFileHandle>().fd;
-	int res = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, offset_bytes, length_bytes);
+	int res = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, UnsafeNumericCast<int64_t>(offset_bytes),
+	                    UnsafeNumericCast<int64_t>(length_bytes));
 	return res == 0;
 #endif
 #else
@@ -503,7 +529,8 @@ int64_t LocalFileSystem::GetFileSize(FileHandle &handle) {
 	int fd = handle.Cast<UnixFileHandle>().fd;
 	struct stat s;
 	if (fstat(fd, &s) == -1) {
-		return -1;
+		throw IOException("Failed to get file size for file \"%s\": %s", {{"errno", std::to_string(errno)}},
+		                  handle.path, strerror(errno));
 	}
 	return s.st_size;
 }
@@ -512,7 +539,8 @@ time_t LocalFileSystem::GetLastModifiedTime(FileHandle &handle) {
 	int fd = handle.Cast<UnixFileHandle>().fd;
 	struct stat s;
 	if (fstat(fd, &s) == -1) {
-		return -1;
+		throw IOException("Failed to get last modified time for file \"%s\": %s", {{"errno", std::to_string(errno)}},
+		                  handle.path, strerror(errno));
 	}
 	return s.st_mtime;
 }
@@ -612,10 +640,6 @@ void LocalFileSystem::RemoveFile(const string &filename, optional_ptr<FileOpener
 
 bool LocalFileSystem::ListFiles(const string &directory, const std::function<void(const string &, bool)> &callback,
                                 FileOpener *opener) {
-	if (!DirectoryExists(directory, opener)) {
-		return false;
-	}
-
 	auto dir = opendir(directory.c_str());
 	if (!dir) {
 		return false;
@@ -634,11 +658,11 @@ bool LocalFileSystem::ListFiles(const string &directory, const std::function<voi
 		}
 		// now stat the file to figure out if it is a regular file or directory
 		string full_path = JoinPath(directory, name);
-		if (access(full_path.c_str(), 0) != 0) {
+		struct stat status;
+		auto res = stat(full_path.c_str(), &status);
+		if (res != 0) {
 			continue;
 		}
-		struct stat status;
-		stat(full_path.c_str(), &status);
 		if (!(status.st_mode & S_IFREG) && !(status.st_mode & S_IFDIR)) {
 			// not a file or directory: skip
 			continue;
@@ -694,8 +718,8 @@ std::string LocalFileSystem::GetLastErrorAsString() {
 
 struct WindowsFileHandle : public FileHandle {
 public:
-	WindowsFileHandle(FileSystem &file_system, string path, HANDLE fd)
-	    : FileHandle(file_system, path), position(0), fd(fd) {
+	WindowsFileHandle(FileSystem &file_system, string path, HANDLE fd, FileOpenFlags flags)
+	    : FileHandle(file_system, path, flags), position(0), fd(fd) {
 	}
 	~WindowsFileHandle() override {
 		Close();
@@ -833,7 +857,7 @@ unique_ptr<FileHandle> LocalFileSystem::OpenFile(const string &path_p, FileOpenF
 			throw IOException("Cannot open file \"%s\": %s", path.c_str(), error);
 		}
 	}
-	auto handle = make_uniq<WindowsFileHandle>(*this, path.c_str(), hFile);
+	auto handle = make_uniq<WindowsFileHandle>(*this, path.c_str(), hFile, flags);
 	if (flags.OpenForAppending()) {
 		auto file_size = GetFileSize(*handle);
 		SetFilePointer(*handle, file_size);
@@ -947,7 +971,8 @@ int64_t LocalFileSystem::GetFileSize(FileHandle &handle) {
 	HANDLE hFile = handle.Cast<WindowsFileHandle>().fd;
 	LARGE_INTEGER result;
 	if (!GetFileSizeEx(hFile, &result)) {
-		return -1;
+		auto error = LocalFileSystem::GetLastErrorAsString();
+		throw IOException("Failed to get file size for file \"%s\": %s", handle.path, error);
 	}
 	return result.QuadPart;
 }
@@ -958,7 +983,8 @@ time_t LocalFileSystem::GetLastModifiedTime(FileHandle &handle) {
 	// https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletime
 	FILETIME last_write;
 	if (GetFileTime(hFile, nullptr, nullptr, &last_write) == 0) {
-		return -1;
+		auto error = LocalFileSystem::GetLastErrorAsString();
+		throw IOException("Failed to get last modified time for file \"%s\": %s", handle.path, error);
 	}
 
 	// https://stackoverflow.com/questions/29266743/what-is-dwlowdatetime-and-dwhighdatetime
@@ -1174,7 +1200,7 @@ static void GlobFilesInternal(FileSystem &fs, const string &path, const string &
 		if (is_directory != match_directory) {
 			return;
 		}
-		if (LikeFun::Glob(fname.c_str(), fname.size(), glob.c_str(), glob.size())) {
+		if (Glob(fname.c_str(), fname.size(), glob.c_str(), glob.size())) {
 			if (join_path) {
 				result.push_back(fs.JoinPath(path, fname));
 			} else {

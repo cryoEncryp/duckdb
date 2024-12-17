@@ -144,6 +144,10 @@ public:
 	DUCKDB_API void Slice(const SelectionVector &sel, idx_t count);
 	//! Slice the vector, keeping the result around in a cache or potentially using the cache instead of slicing
 	DUCKDB_API void Slice(const SelectionVector &sel, idx_t count, SelCache &cache);
+	//! Turn this vector into a dictionary vector
+	DUCKDB_API void Dictionary(idx_t dictionary_size, const SelectionVector &sel, idx_t count);
+	//! Creates a reference to a dictionary of the other vector
+	DUCKDB_API void Dictionary(const Vector &dict, idx_t dictionary_size, const SelectionVector &sel, idx_t count);
 
 	//! Creates the data of this vector with the specified type. Any data that
 	//! is currently in the vector is destroyed.
@@ -203,6 +207,8 @@ public:
 
 	DUCKDB_API void Serialize(Serializer &serializer, idx_t count);
 	DUCKDB_API void Deserialize(Deserializer &deserializer, idx_t count);
+
+	idx_t GetAllocationSize(idx_t cardinality) const;
 
 	// Getters
 	inline VectorType GetVectorType() const {
@@ -302,21 +308,43 @@ struct ConstantVector {
 };
 
 struct DictionaryVector {
-	static inline const SelectionVector &SelVector(const Vector &vector) {
+	static void VerifyDictionary(const Vector &vector) {
+#ifdef DUCKDB_DEBUG_NO_SAFETY
 		D_ASSERT(vector.GetVectorType() == VectorType::DICTIONARY_VECTOR);
+#else
+		if (vector.GetVectorType() != VectorType::DICTIONARY_VECTOR) {
+			throw InternalException(
+			    "Operation requires a dictionary vector but a non-dictionary vector was encountered");
+		}
+#endif
+	}
+	static inline const SelectionVector &SelVector(const Vector &vector) {
+		VerifyDictionary(vector);
 		return vector.buffer->Cast<DictionaryBuffer>().GetSelVector();
 	}
 	static inline SelectionVector &SelVector(Vector &vector) {
-		D_ASSERT(vector.GetVectorType() == VectorType::DICTIONARY_VECTOR);
+		VerifyDictionary(vector);
 		return vector.buffer->Cast<DictionaryBuffer>().GetSelVector();
 	}
 	static inline const Vector &Child(const Vector &vector) {
-		D_ASSERT(vector.GetVectorType() == VectorType::DICTIONARY_VECTOR);
+		VerifyDictionary(vector);
 		return vector.auxiliary->Cast<VectorChildBuffer>().data;
 	}
 	static inline Vector &Child(Vector &vector) {
-		D_ASSERT(vector.GetVectorType() == VectorType::DICTIONARY_VECTOR);
+		VerifyDictionary(vector);
 		return vector.auxiliary->Cast<VectorChildBuffer>().data;
+	}
+	static inline optional_idx DictionarySize(const Vector &vector) {
+		VerifyDictionary(vector);
+		return vector.buffer->Cast<DictionaryBuffer>().GetDictionarySize();
+	}
+	static inline const string &DictionaryId(const Vector &vector) {
+		VerifyDictionary(vector);
+		return vector.buffer->Cast<DictionaryBuffer>().GetDictionaryId();
+	}
+	static inline void SetDictionaryId(Vector &vector, string new_id) {
+		VerifyDictionary(vector);
+		vector.buffer->Cast<DictionaryBuffer>().SetDictionaryId(std::move(new_id));
 	}
 };
 
@@ -470,8 +498,10 @@ struct FSSTVector {
 
 	DUCKDB_API static string_t AddCompressedString(Vector &vector, string_t data);
 	DUCKDB_API static string_t AddCompressedString(Vector &vector, const char *data, idx_t len);
-	DUCKDB_API static void RegisterDecoder(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder);
+	DUCKDB_API static void RegisterDecoder(Vector &vector, buffer_ptr<void> &duckdb_fsst_decoder,
+	                                       const idx_t string_block_limit);
 	DUCKDB_API static void *GetDecoder(const Vector &vector);
+	DUCKDB_API static vector<unsigned char> &GetDecompressBuffer(const Vector &vector);
 	//! Setting the string count is required to be able to correctly flatten the vector
 	DUCKDB_API static void SetCount(Vector &vector, idx_t count);
 	DUCKDB_API static idx_t GetCount(Vector &vector);

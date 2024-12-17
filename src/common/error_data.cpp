@@ -4,6 +4,7 @@
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/to_string.hpp"
 #include "duckdb/common/types.hpp"
+#include "duckdb/common/stacktrace.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_error_context.hpp"
 #include "duckdb/parser/tableref.hpp"
@@ -17,10 +18,12 @@ ErrorData::ErrorData(const std::exception &ex) : ErrorData(ex.what()) {
 }
 
 ErrorData::ErrorData(ExceptionType type, const string &message)
-    : initialized(true), type(type), raw_message(SanitizeErrorMessage(message)) {
+    : initialized(true), type(type), raw_message(SanitizeErrorMessage(message)),
+      final_message(ConstructFinalMessage()) {
 }
 
-ErrorData::ErrorData(const string &message) : initialized(true), type(ExceptionType::INVALID), raw_message(string()) {
+ErrorData::ErrorData(const string &message)
+    : initialized(true), type(ExceptionType::INVALID), raw_message(string()), final_message(string()) {
 
 	// parse the constructed JSON
 	if (message.empty() || message[0] != '{') {
@@ -29,11 +32,9 @@ ErrorData::ErrorData(const string &message) : initialized(true), type(ExceptionT
 		if (message == std::bad_alloc().what()) {
 			type = ExceptionType::OUT_OF_MEMORY;
 			raw_message = "Allocation failure";
-			return;
+		} else {
+			raw_message = message;
 		}
-
-		raw_message = message;
-		return;
 	} else {
 		auto info = StringUtil::ParseJSONMap(message);
 		for (auto &entry : info) {
@@ -46,25 +47,26 @@ ErrorData::ErrorData(const string &message) : initialized(true), type(ExceptionT
 			}
 		}
 	}
-}
 
-const string &ErrorData::Message() {
-	if (final_message.empty()) {
-		if (type != ExceptionType::UNKNOWN_TYPE) {
-			final_message = Exception::ExceptionTypeToString(type) + " ";
-		}
-		final_message += "Error: " + raw_message;
-		if (type == ExceptionType::INTERNAL) {
-			final_message += "\nThis error signals an assertion failure within DuckDB. This usually occurs due to "
-			                 "unexpected conditions or errors in the program's logic.\nFor more information, see "
-			                 "https://duckdb.org/docs/dev/internal_errors";
-		}
-	}
-	return final_message;
+	final_message = ConstructFinalMessage();
 }
 
 string ErrorData::SanitizeErrorMessage(string error) {
 	return StringUtil::Replace(std::move(error), string("\0", 1), "\\0");
+}
+
+string ErrorData::ConstructFinalMessage() const {
+	std::string error;
+	if (type != ExceptionType::UNKNOWN_TYPE) {
+		error = Exception::ExceptionTypeToString(type) + " ";
+	}
+	error += "Error: " + raw_message;
+	if (type == ExceptionType::INTERNAL) {
+		error += "\nThis error signals an assertion failure within DuckDB. This usually occurs due to "
+		         "unexpected conditions or errors in the program's logic.\nFor more information, see "
+		         "https://duckdb.org/docs/dev/internal_errors";
+	}
+	return error;
 }
 
 void ErrorData::Throw(const string &prepended_message) const {
@@ -97,16 +99,33 @@ void ErrorData::ConvertErrorToJSON() {
 		// empty or already JSON
 		return;
 	}
-	raw_message = StringUtil::ToJSONMap(type, raw_message, extra_info);
+	raw_message = StringUtil::ExceptionToJSONMap(type, raw_message, extra_info);
 	final_message = raw_message;
 }
 
-void ErrorData::AddErrorLocation(const string &query) {
-	auto entry = extra_info.find("position");
-	if (entry == extra_info.end()) {
-		return;
+void ErrorData::FinalizeError() {
+	auto entry = extra_info.find("stack_trace_pointers");
+	if (entry != extra_info.end()) {
+		auto stack_trace = StackTrace::ResolveStacktraceSymbols(entry->second);
+		extra_info["stack_trace"] = std::move(stack_trace);
+		extra_info.erase("stack_trace_pointers");
 	}
-	raw_message = QueryErrorContext::Format(query, raw_message, std::stoull(entry->second));
+}
+
+void ErrorData::AddErrorLocation(const string &query) {
+	if (!query.empty()) {
+		auto entry = extra_info.find("position");
+		if (entry != extra_info.end()) {
+			raw_message = QueryErrorContext::Format(query, raw_message, std::stoull(entry->second));
+		}
+	}
+	{
+		auto entry = extra_info.find("stack_trace");
+		if (entry != extra_info.end()) {
+			raw_message += "\n\nStack Trace:\n" + entry->second;
+		}
+	}
+	final_message = ConstructFinalMessage();
 }
 
 void ErrorData::AddQueryLocation(optional_idx query_location) {

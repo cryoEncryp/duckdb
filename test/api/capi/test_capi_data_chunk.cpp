@@ -217,46 +217,6 @@ TEST_CASE("Test DataChunk C API", "[capi]") {
 	}
 }
 
-TEST_CASE("Test DataChunk appending incorrect types in C API", "[capi]") {
-	CAPITester tester;
-	duckdb::unique_ptr<CAPIResult> result;
-	duckdb_state status;
-
-	REQUIRE(tester.OpenDatabase(nullptr));
-
-	REQUIRE(duckdb_vector_size() == STANDARD_VECTOR_SIZE);
-
-	tester.Query("CREATE TABLE test(i BIGINT, j SMALLINT)");
-
-	duckdb_logical_type types[2];
-	types[0] = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
-	types[1] = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-
-	auto data_chunk = duckdb_create_data_chunk(types, 2);
-	REQUIRE(data_chunk);
-
-	auto col1_ptr = (int64_t *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(data_chunk, 0));
-	*col1_ptr = 42;
-	auto col2_ptr = (bool *)duckdb_vector_get_data(duckdb_data_chunk_get_vector(data_chunk, 1));
-	*col2_ptr = false;
-
-	duckdb_appender appender;
-	status = duckdb_appender_create(tester.connection, nullptr, "test", &appender);
-	REQUIRE(status == DuckDBSuccess);
-
-	REQUIRE(duckdb_append_data_chunk(appender, data_chunk) == DuckDBError);
-
-	auto error = duckdb_appender_error(appender);
-	REQUIRE(duckdb::StringUtil::Contains(error, "expected SMALLINT but got BOOLEAN for column 2"));
-
-	duckdb_appender_destroy(&appender);
-
-	duckdb_destroy_data_chunk(&data_chunk);
-
-	duckdb_destroy_logical_type(&types[0]);
-	duckdb_destroy_logical_type(&types[1]);
-}
-
 TEST_CASE("Test DataChunk varchar result fetch in C API", "[capi]") {
 	if (duckdb_vector_size() < 64) {
 		return;
@@ -394,6 +354,9 @@ TEST_CASE("Test duckdb_result_return_type", "[capi]") {
 }
 
 TEST_CASE("Test DataChunk populate ListVector in C API", "[capi]") {
+	if (duckdb_vector_size() < 3) {
+		return;
+	}
 	REQUIRE(duckdb_list_vector_reserve(nullptr, 100) == duckdb_state::DuckDBError);
 	REQUIRE(duckdb_list_vector_set_size(nullptr, 200) == duckdb_state::DuckDBError);
 
@@ -402,6 +365,7 @@ TEST_CASE("Test DataChunk populate ListVector in C API", "[capi]") {
 	duckdb_logical_type schema[] = {list_type};
 	auto chunk = duckdb_create_data_chunk(schema, 1);
 	auto list_vector = duckdb_data_chunk_get_vector(chunk, 0);
+	duckdb_data_chunk_set_size(chunk, 3);
 
 	REQUIRE(duckdb_list_vector_reserve(list_vector, 123) == duckdb_state::DuckDBSuccess);
 	REQUIRE(duckdb_list_vector_get_size(list_vector) == 0);
@@ -412,20 +376,26 @@ TEST_CASE("Test DataChunk populate ListVector in C API", "[capi]") {
 	REQUIRE(duckdb_list_vector_set_size(list_vector, 123) == duckdb_state::DuckDBSuccess);
 	REQUIRE(duckdb_list_vector_get_size(list_vector) == 123);
 
-#if STANDARD_VECTOR_SIZE > 2
 	auto entries = (duckdb_list_entry *)duckdb_vector_get_data(list_vector);
 	entries[0].offset = 0;
 	entries[0].length = 20;
 	entries[1].offset = 20;
-	entries[1].offset = 80;
+	entries[1].length = 80;
 	entries[2].offset = 100;
 	entries[2].length = 23;
 
-	auto vector = (Vector &)(*list_vector);
+	auto child_data = (int *)duckdb_vector_get_data(child);
+	int count = 0;
+	for (idx_t i = 0; i < duckdb_data_chunk_get_size(chunk); i++) {
+		for (idx_t j = 0; j < entries[i].length; j++) {
+			REQUIRE(child_data[entries[i].offset + j] == count);
+			count++;
+		}
+	}
+	auto &vector = (Vector &)(*list_vector);
 	for (int i = 0; i < 123; i++) {
 		REQUIRE(ListVector::GetEntry(vector).GetValue(i) == i);
 	}
-#endif
 
 	duckdb_destroy_data_chunk(&chunk);
 	duckdb_destroy_logical_type(&list_type);
@@ -492,7 +462,7 @@ TEST_CASE("Test PK violation in the C API appender", "[capi]") {
 	auto state = duckdb_appender_close(appender);
 	REQUIRE(state == DuckDBError);
 	auto error = duckdb_appender_error(appender);
-	REQUIRE(duckdb::StringUtil::Contains(error, "PRIMARY KEY or UNIQUE constraint violated"));
+	REQUIRE(duckdb::StringUtil::Contains(error, "PRIMARY KEY or UNIQUE constraint violation"));
 
 	// Destroy the appender despite the error to avoid leaks.
 	state = duckdb_appender_destroy(&appender);
@@ -521,7 +491,7 @@ TEST_CASE("Test PK violation in the C API appender", "[capi]") {
 	state = duckdb_appender_flush(appender);
 	REQUIRE(state == DuckDBError);
 	error = duckdb_appender_error(appender);
-	REQUIRE(duckdb::StringUtil::Contains(error, "PRIMARY KEY or UNIQUE constraint violated"));
+	REQUIRE(duckdb::StringUtil::Contains(error, "PRIMARY KEY or UNIQUE constraint violation"));
 	REQUIRE(duckdb_appender_destroy(&appender) == DuckDBError);
 
 	// Ensure that only the last row was appended.

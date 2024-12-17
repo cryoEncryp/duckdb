@@ -1,9 +1,9 @@
+#include "duckdb/common/helper.hpp"
 #include "duckdb/common/multi_file_reader.hpp"
 #include "json_functions.hpp"
 #include "json_scan.hpp"
 #include "json_structure.hpp"
 #include "json_transform.hpp"
-#include "duckdb/common/helper.hpp"
 
 namespace duckdb {
 
@@ -99,8 +99,8 @@ void JSONScan::AutoDetect(ClientContext &context, JSONScanData &bind_data, vecto
 	bind_data.type = JSONScanType::READ_JSON;
 
 	// Convert structure to logical type
-	auto type =
-	    JSONStructure::StructureToType(context, node, bind_data.max_depth, bind_data.field_appearance_threshold);
+	auto type = JSONStructure::StructureToType(context, node, bind_data.max_depth, bind_data.field_appearance_threshold,
+	                                           bind_data.map_inference_threshold);
 
 	// Auto-detect record type
 	if (bind_data.options.record_type == JSONRecordType::AUTO_DETECT) {
@@ -145,6 +145,9 @@ unique_ptr<FunctionData> ReadJSONBind(ClientContext &context, TableFunctionBindI
 	bind_data->Bind(context, input);
 
 	for (auto &kv : input.named_parameters) {
+		if (kv.second.IsNull()) {
+			throw BinderException("Cannot use NULL as function argument");
+		}
 		auto loption = StringUtil::Lower(kv.first);
 		if (kv.second.IsNull()) {
 			throw BinderException("read_json parameter \"%s\" cannot be NULL.", loption);
@@ -196,6 +199,16 @@ unique_ptr<FunctionData> ReadJSONBind(ClientContext &context, TableFunctionBindI
 				    "read_json_auto \"field_appearance_threshold\" parameter must be between 0 and 1");
 			}
 			bind_data->field_appearance_threshold = arg;
+		} else if (loption == "map_inference_threshold") {
+			auto arg = BigIntValue::Get(kv.second);
+			if (arg == -1) {
+				bind_data->map_inference_threshold = NumericLimits<idx_t>::Maximum();
+			} else if (arg >= 0) {
+				bind_data->map_inference_threshold = arg;
+			} else {
+				throw BinderException("read_json_auto \"map_inference_threshold\" parameter must be 0 or positive, "
+				                      "or -1 to disable map inference for consistent objects.");
+			}
 		} else if (loption == "dateformat" || loption == "date_format") {
 			auto format_string = StringValue::Get(kv.second);
 			if (StringUtil::Lower(format_string) == "iso") {
@@ -317,8 +330,8 @@ static void ReadJSONFunction(ClientContext &context, TableFunctionInput &data_p,
 
 	if (!gstate.names.empty()) {
 		vector<Vector *> result_vectors;
-		result_vectors.reserve(gstate.column_indices.size());
-		for (const auto &col_idx : gstate.column_indices) {
+		result_vectors.reserve(gstate.column_ids.size());
+		for (const auto &col_idx : gstate.column_ids) {
 			result_vectors.emplace_back(&output.data[col_idx]);
 		}
 
@@ -326,11 +339,12 @@ static void ReadJSONFunction(ClientContext &context, TableFunctionInput &data_p,
 		bool success;
 		if (gstate.bind_data.options.record_type == JSONRecordType::RECORDS) {
 			success = JSONTransform::TransformObject(values, lstate.GetAllocator(), count, gstate.names, result_vectors,
-			                                         lstate.transform_options);
+			                                         lstate.transform_options, gstate.column_indices,
+			                                         lstate.transform_options.error_unknown_key);
 		} else {
 			D_ASSERT(gstate.bind_data.options.record_type == JSONRecordType::VALUES);
 			success = JSONTransform::Transform(values, lstate.GetAllocator(), *result_vectors[0], count,
-			                                   lstate.transform_options);
+			                                   lstate.transform_options, gstate.column_indices[0]);
 		}
 
 		if (!success) {
@@ -380,6 +394,7 @@ TableFunctionSet CreateJSONFunctionInfo(string name, shared_ptr<JSONScanInfo> in
 	table_function.named_parameters["maximum_depth"] = LogicalType::BIGINT;
 	table_function.named_parameters["field_appearance_threshold"] = LogicalType::DOUBLE;
 	table_function.named_parameters["convert_strings_to_integers"] = LogicalType::BOOLEAN;
+	table_function.named_parameters["map_inference_threshold"] = LogicalType::BIGINT;
 	return MultiFileReader::CreateFunctionSet(table_function);
 }
 

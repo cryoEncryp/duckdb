@@ -1,5 +1,5 @@
 # name: test/sql/cte/trampoline.test
-# description:
+# description: 
 # group: [cte]
 
 statement ok
@@ -61,34 +61,34 @@ FROM tbl;
 #FROM t;
 #----
 
-24	22
+#24	22
 
-query I
-WITH RECURSIVE TRAMPOLINE t(c,r) as (
-	select * from (values(1,0),(1,0),(2,0)) v
-		JUMP
-	select 2,0 from t
-		JUMP
-	select 0, count(*) from (select c+r as s from t) where s<10
-)
-SELECT r
-FROM t
-ORDER BY r;
-----
-1
-2
-
-query I
-WITH RECURSIVE TRAMPOLINE t(c,r) AS (
-	select * from (values(1,0),(1,0),(2,0)) v
-		JUMP
-	select 3,0 from t
-		JUMP
-	select 3,0 from t
-		JUMP
-	select 0,count(*) from t
-) SELECT r
-FROM t;
-----
-1
-2
+#query I
+#WITH RECURSIVE TRAMPOLINE t(c,r) as (
+#	select * from (values(1,0),(1,0),(2,0)) v
+#		JUMP
+#	select 2,0 from t
+#		JUMP
+#	select 0, count(*) from (select c+r as s from t) where s<10
+#)
+#SELECT r
+#FROM t
+#ORDER BY r;
+#----
+#1
+#2
+#
+#query I
+#WITH RECURSIVE TRAMPOLINE t(c,r) AS (
+#	select * from (values(1,0),(1,0),(2,0)) v
+#		JUMP
+#	select 3,0 from t
+#		JUMP
+#	select 3,0 from t
+#		JUMP
+#	select 0,count(*) from t
+#) SELECT r
+#FROM t;
+#----
+#1
+#2

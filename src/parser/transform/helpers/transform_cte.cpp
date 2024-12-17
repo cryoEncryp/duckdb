@@ -156,7 +156,8 @@ unique_ptr<SelectStatement> Transformer::TransformTrampolineCTE(duckdb_libpgquer
 		if (!result.left) {
 			result.ctename = string(cte.ctename);
 			result.union_all = false;
-			result.left = TransformSelectNode(*Transformer::PGPointerCast<duckdb_libpgquery::PGNode>(branch->data.ptr_value));
+			result.left =
+			    TransformSelectNode(*Transformer::PGPointerCast<duckdb_libpgquery::PGNode>(branch->data.ptr_value));
 			result.aliases = info.aliases;
 		} else {
 			result.trampolines.emplace_back(

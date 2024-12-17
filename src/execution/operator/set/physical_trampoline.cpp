@@ -8,7 +8,7 @@ namespace duckdb {
 
 class TrampolineCTEState : public GlobalSinkState {
 public:
-	explicit TrampolineCTEState(ClientContext &context, const PhysicalTrampoline &op){
+	explicit TrampolineCTEState(ClientContext &context, const PhysicalTrampoline &op) {
 		// Initialize the intermediate tables and scan states, each branch gets
 		// a separate intermediate table and scan state
 		// intermediate table on index 0 should be scanned for results.
@@ -17,7 +17,6 @@ public:
 			scan_states.emplace_back(ColumnDataScanState());
 			new_groups.push_back(SelectionVector(STANDARD_VECTOR_SIZE));
 		}
-
 	}
 	bool intermediate_empty = true;
 	mutex intermediate_table_lock;
@@ -26,7 +25,8 @@ public:
 
 	// Each branch, including the return branch (Q0), has its own intermediate table and state.
 	vector<shared_ptr<ColumnDataCollection>> intermediate_tables;
-	// BTODO: Is it necessary to create a scan state for each branch? We only scan branch 0 other intermediate tables are only combined(?)
+	// BTODO: Is it necessary to create a scan state for each branch? We only scan branch 0 other intermediate tables
+	// are only combined(?)
 	vector<ColumnDataScanState> scan_states;
 	// SelectionVectors used to match incoming rows to the correct intermediate table…
 	vector<SelectionVector> new_groups;
@@ -155,9 +155,9 @@ SourceResultType PhysicalTrampoline::GetData(ExecutionContext &context, DataChun
 			// with another recursion. If we do not produce any rows, we are done.
 
 			// We set up the working table with the data we gathered in this iteration.
-			for(idx_t branch_idx = 0; branch_idx < working_tables.size(); branch_idx++) {
+			for (idx_t branch_idx = 0; branch_idx < working_tables.size(); branch_idx++) {
 				working_tables[branch_idx]->Reset();
-				working_tables[branch_idx]->Combine(*gstate.intermediate_tables[branch_idx+1]);
+				working_tables[branch_idx]->Combine(*gstate.intermediate_tables[branch_idx + 1]);
 			}
 
 			// We clear the intermediate table

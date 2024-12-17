@@ -48,7 +48,8 @@ unique_ptr<BoundQueryNode> Binder::BindNode(RecursiveCTENode &statement) {
 		auto binder = Binder::CreateBinder(context, this);
 
 		// Create a binding of the recurisive CTE name to different table indexes.
-		binder->bind_context.AddCTEBinding(result->table_indices[child_index], statement.ctename, result->names, result->types);
+		binder->bind_context.AddCTEBinding(result->table_indices[child_index], statement.ctename, result->names,
+		                                   result->types);
 
 		result->trampolines.emplace_back(binder->BindNode(*statement.trampolines[child_index]));
 		result->trampoline_binder.emplace_back(binder);

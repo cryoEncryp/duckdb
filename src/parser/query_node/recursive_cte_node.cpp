@@ -34,9 +34,9 @@ bool RecursiveCTENode::Equals(const QueryNode *other_p) const {
 	}
 	// btodo: good way to compare branches with each other
 	/*
-		if (!right->Equals(other.right.get())) {
-			return false;
-		}
+	    if (!right->Equals(other.right.get())) {
+	        return false;
+	    }
 	*/
 	return true;
 }

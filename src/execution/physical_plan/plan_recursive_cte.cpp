@@ -21,7 +21,7 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 		auto right = CreatePlan(*op.children[1]);
 
 		auto cte = make_uniq<PhysicalRecursiveCTE>(op.ctename, op.table_index, op.types, op.union_all, std::move(left),
-													std::move(right), op.estimated_cardinality);
+		                                           std::move(right), op.estimated_cardinality);
 
 		cte->working_table = working_table;
 		return std::move(cte);
@@ -40,8 +40,9 @@ unique_ptr<PhysicalOperator> PhysicalPlanGenerator::CreatePlan(LogicalRecursiveC
 		}
 
 		// BTODO: Constructor with only seed and branches
-		auto cte = make_uniq<PhysicalTrampoline>(op.ctename, op.table_index, op.types, op.union_all, std::move(branches[0]),
-												std::move(branches[1]), std::move(branches), op.estimated_cardinality);
+		auto cte =
+		    make_uniq<PhysicalTrampoline>(op.ctename, op.table_index, op.types, op.union_all, std::move(branches[0]),
+		                                  std::move(branches[1]), std::move(branches), op.estimated_cardinality);
 		cte->working_tables = std::move(working_tables);
 		return std::move(cte);
 	}

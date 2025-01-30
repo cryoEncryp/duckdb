@@ -17,10 +17,10 @@ on:
       skip_tests:
         type: string
   push:
-    branches:
-      - "**"
-      - "!main"
-      - "!feature"
+    branches-ignore:
+      - 'main'
+      - 'feature'
+      - 'v*.*-*'
     paths-ignore:
       - "**"
       - "!.github/workflows/Pyodide.yml"
@@ -108,7 +108,7 @@ jobs:
       - name: install deps into environment
         run: |
           source .venv-pyodide/bin/activate
-          pip install pytest numpy pandas mypy
+          pip install pytest numpy pandas 'mypy<=1.13'
 
       - name: install duckdb wasm wheel into environment
         run: |

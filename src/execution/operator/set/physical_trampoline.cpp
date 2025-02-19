@@ -14,7 +14,7 @@ public:
 		// intermediate table on index 0 should be scanned for results.
 		for (auto &child : op.children) {
 			intermediate_tables.emplace_back(make_shared_ptr<ColumnDataCollection>(context, child->GetTypes()));
-			scan_states.emplace_back(ColumnDataScanState());
+			scan_state = ColumnDataScanState();
 			new_groups.push_back(SelectionVector(STANDARD_VECTOR_SIZE));
 		}
 	}
@@ -25,9 +25,8 @@ public:
 
 	// Each branch, including the return branch (Q0), has its own intermediate table and state.
 	vector<shared_ptr<ColumnDataCollection>> intermediate_tables;
-	// BTODO: Is it necessary to create a scan state for each branch? We only scan branch 0 other intermediate tables
-	// are only combined(?)
-	vector<ColumnDataScanState> scan_states;
+	// State to scan the q0 intermediate table
+	ColumnDataScanState scan_state;
 	// SelectionVectors used to match incoming rows to the correct intermediate table…
 	vector<SelectionVector> new_groups;
 };
@@ -81,6 +80,7 @@ SinkResultType PhysicalTrampoline::Sink(ExecutionContext &context, DataChunk &ch
 //===--------------------------------------------------------------------===//
 
 void PhysicalTrampoline::BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) {
+	D_ASSERT(children.size() >= 2);
 	op_state.reset();
 	sink_state.reset();
 	recursive_meta_pipeline.reset();
@@ -101,17 +101,16 @@ void PhysicalTrampoline::BuildPipelines(Pipeline &current, MetaPipeline &meta_pi
 	recursive_meta_pipeline->SetRecursiveCTE();
 
 	vector<const_reference<PhysicalOperator>> ops;
+
+	// Create first pipeline
+	auto first_branch_pipeline = recursive_meta_pipeline->GetBasePipeline();
+	children[1]->BuildPipelines(*first_branch_pipeline, *recursive_meta_pipeline);
+	GatherColumnDataScans(*children[1], ops);
+
 	// The idea is that children contains all branches of the trampoline
-	auto first = true;
-	for (idx_t child_index = 1; child_index < children.size(); child_index++) {
-		if (first) {
-			recursive_meta_pipeline->Build(*children[child_index]);
-			first = false;
-		} else {
-			// BTODO: Why is new Pipeline needed?
-			recursive_meta_pipeline->CreatePipeline();
-			recursive_meta_pipeline->Build(*children[child_index]);
-		}
+	for (idx_t child_index = 2; child_index < children.size(); child_index++) {
+		auto &branch_pipeline = recursive_meta_pipeline->CreatePipeline();
+		children[child_index]->BuildPipelines(branch_pipeline, *recursive_meta_pipeline);
 		GatherColumnDataScans(*children[child_index], ops);
 	}
 
@@ -137,14 +136,14 @@ SourceResultType PhysicalTrampoline::GetData(ExecutionContext &context, DataChun
 
 	if (!gstate.initialized) {
 		// The first call to GetData initialises the scan of the intermediate table.
-		gstate.intermediate_tables[0]->InitializeScan(gstate.scan_states[0]);
+		gstate.intermediate_tables[0]->InitializeScan(gstate.scan_state);
 		gstate.finished_scan = false;
 		gstate.initialized = true;
 	}
 	while (chunk.size() == 0) {
 		if (!gstate.finished_scan) {
 			// After each iteration, we scan all the rows collected so far from the Q0 table.
-			gstate.intermediate_tables[0]->Scan(gstate.scan_states[0], chunk);
+			gstate.intermediate_tables[0]->Scan(gstate.scan_state, chunk);
 			if (chunk.size() == 0) {
 				gstate.finished_scan = true;
 			} else {
@@ -182,7 +181,7 @@ SourceResultType PhysicalTrampoline::GetData(ExecutionContext &context, DataChun
 			}
 			// We have produced new rows.
 			// We may therefore have new rows in table Q0 that need to be scanned.
-			gstate.intermediate_tables[0]->InitializeScan(gstate.scan_states[0]);
+			gstate.intermediate_tables[0]->InitializeScan(gstate.scan_state);
 		}
 	}
 	return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;

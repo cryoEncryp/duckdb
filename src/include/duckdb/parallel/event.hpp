@@ -49,6 +49,10 @@ public:
 	bool IsFinished() const {
 		return finished;
 	}
+	//! Reset the count of finished tasks and dependencies and set finished to false
+	void Reset();
+	// BTODO:  Remove, to set a event again
+	void ResetParent();
 
 	virtual void PrintPipeline() {
 	}

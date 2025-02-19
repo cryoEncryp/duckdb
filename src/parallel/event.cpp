@@ -16,13 +16,36 @@ void Event::CompleteDependency() {
 	D_ASSERT(current_finished <= total_dependencies);
 	if (current_finished == total_dependencies) {
 		// all dependencies have been completed: schedule the event
-		D_ASSERT(total_tasks == 0);
+		// BTODO: rethink about it
+		// D_ASSERT(total_tasks == 0);
 		Schedule();
 		if (total_tasks == 0) {
 			Finish();
 		}
 	}
 }
+
+void Event::Reset() {
+	// set event is not finished
+	finished = false;
+	// as all tasks are being rescheduled, we do not have a completed task yet.
+	finished_tasks = 0;
+	// as event is rescheduled, we do not have a completed dependencies yet.
+	finished_dependencies = 0;
+}
+
+// BTODO: remove, only used because we recursive event in an ugly way
+void Event::ResetParent() {
+	// set event is not finished
+	finished = false;
+	// as all tasks are rescheduled, we do not have a completed task yet.
+	finished_tasks = 0;
+	// as event is rescheduled, we do not have a completed dependencies yet.
+	finished_dependencies = 0;
+	// BTODO: remove only because insertion is not correct
+	total_dependencies = 1;
+}
+
 
 void Event::Finish() {
 	D_ASSERT(!finished);
@@ -78,7 +101,8 @@ void Event::InsertEvent(shared_ptr<Event> replacement_event) {
 
 void Event::SetTasks(vector<shared_ptr<Task>> tasks) {
 	auto &ts = TaskScheduler::GetScheduler(executor.context);
-	D_ASSERT(total_tasks == 0);
+	// BTODO: This needs to be disabled so we can add tasks over again
+	// D_ASSERT(total_tasks == 0);
 	D_ASSERT(!tasks.empty());
 	this->total_tasks = tasks.size();
 	for (auto &task : tasks) {

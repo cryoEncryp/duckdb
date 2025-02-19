@@ -2,7 +2,7 @@
 #include "duckdb/execution/operator/set/physical_trampoline.hpp"
 #include "duckdb/parallel/meta_pipeline.hpp"
 #include "duckdb/parallel/pipeline.hpp"
-#include "duckdb/execution/executor.hpp"
+#include "duckdb/parallel/pipeline_recursive_event.hpp"
 
 namespace duckdb {
 
@@ -233,6 +233,28 @@ void PhysicalTrampoline::ExecuteRecursivePipelines(ExecutionContext &context) co
 			break;
 		}
 	}
+}
+
+// BTODO: REMOVE only for testing
+SinkFinalizeType PhysicalTrampoline::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
+                                                 OperatorSinkFinalizeInput &input) const {
+	return FinalizeInternal(pipeline, event, context, input.global_state, true);
+}
+
+// BTODO: REMOVE only for testing
+SinkFinalizeType PhysicalTrampoline::FinalizeInternal(Pipeline &pipeline, Event &event, ClientContext &context,
+                                                         GlobalSinkState &gstate_p, bool check_distinct) const {
+	// This should be a random event which should be rescheduled every iteration
+	shared_ptr<PipelineRecursiveChildEvent> child = make_shared_ptr<PipelineRecursiveChildEvent>(pipeline.shared_from_this());
+
+	shared_ptr<PipelineRecursiveEvent> r = make_shared_ptr<PipelineRecursiveEvent>(pipeline.shared_from_this(), child);
+
+	event.InsertEvent(r);
+	r->AddDependency(*child);
+
+	// BTODO: for new schedule, but should be scheduled from seed branch
+	child->Schedule();
+	return SinkFinalizeType::READY;
 }
 
 } // namespace duckdb

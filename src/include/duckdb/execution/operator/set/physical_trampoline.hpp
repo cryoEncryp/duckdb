@@ -27,6 +27,12 @@ public:
 
 	// Sink interface
 	SinkResultType Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const override;
+	// BTODO: remove, only for testing
+	SinkFinalizeType Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
+	                          OperatorSinkFinalizeInput &input) const override;
+	SinkFinalizeType FinalizeInternal(Pipeline &pipeline, Event &event, ClientContext &context, GlobalSinkState &gstate,
+	                                  bool check_distinct) const;
+
 	void ExecuteRecursivePipelines(ExecutionContext &context) const;
 };
 

@@ -48,6 +48,7 @@ public:
 
 	mutex intermediate_table_lock;
 	ColumnDataCollection intermediate_table;
+	ColumnDataScanState scan_recurring_state;
 	ColumnDataScanState scan_state;
 	bool initialized = false;
 	bool finished_scan = false;
@@ -90,31 +91,14 @@ SinkResultType PhysicalRecursiveCTE::Sink(ExecutionContext &context, DataChunk &
 	auto &gstate = input.global_state.Cast<RecursiveCTEState>();
 
 	lock_guard<mutex> guard(gstate.intermediate_table_lock);
-	if (!using_key) {
-		if (!union_all) {
-			idx_t match_count = ProbeHT(chunk, gstate);
-			if (match_count > 0) {
-				gstate.intermediate_table.Append(chunk);
-			}
-		} else {
+	if (!union_all && !using_key) {
+		idx_t match_count = ProbeHT(chunk, gstate);
+		if (match_count > 0) {
 			gstate.intermediate_table.Append(chunk);
 		}
 	} else {
-		// Split incoming DataChunk into payload and keys
-		DataChunk distinct_rows;
-		distinct_rows.Initialize(Allocator::DefaultAllocator(), distinct_types);
-		PopulateChunk(distinct_rows, chunk, distinct_idx, true);
-		DataChunk payload_rows;
-		if (!payload_types.empty()) {
-			payload_rows.Initialize(Allocator::DefaultAllocator(), payload_types);
-		}
-		PopulateChunk(payload_rows, chunk, payload_idx, true);
-
-		// Add the chunk to the hash table and append it to the intermediate table
-		gstate.ht->AddChunk(distinct_rows, payload_rows, AggregateType::NON_DISTINCT);
 		gstate.intermediate_table.Append(chunk);
 	}
-
 	return SinkResultType::NEED_MORE_INPUT;
 }
 
@@ -152,7 +136,26 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 
 			// After an iteration, we reset the recurring table
 			// and fill it up with the new hash table rows for the next iteration.
-			if (using_key && ref_recurring && gstate.intermediate_table.Count() != 0) {
+			if (using_key && gstate.intermediate_table.Count() != 0) {
+
+				// We had read the whole hash table we now can make changes
+				gstate.intermediate_table.InitializeScan(gstate.scan_state);
+				DataChunk changed_rows;
+				changed_rows.Initialize(Allocator::DefaultAllocator(), chunk.GetTypes());
+				while (gstate.intermediate_table.Scan(gstate.scan_state, changed_rows)) {
+					DataChunk distinct_rows;
+					distinct_rows.Initialize(Allocator::DefaultAllocator(), distinct_types);
+					PopulateChunk(distinct_rows, changed_rows, distinct_idx, true);
+					DataChunk payload_rows;
+					if (!payload_types.empty()) {
+						payload_rows.Initialize(Allocator::DefaultAllocator(), payload_types);
+					}
+					PopulateChunk(payload_rows, changed_rows, payload_idx, true);
+
+					// Add the chunk to the hash table and append it to the intermediate table
+					gstate.ht->AddChunk(distinct_rows, payload_rows, AggregateType::NON_DISTINCT);
+				}
+
 				recurring_table->Reset();
 				AggregateHTScanState scan_state;
 				gstate.ht->InitializeScan(scan_state);

@@ -20,6 +20,7 @@
 namespace duckdb {
 class ClientContext;
 class ColumnDataCollection;
+class GroupedAggregateHashTable;
 
 class PhysicalPlan {
 public:
@@ -71,7 +72,7 @@ public:
 	//! This data structure is used to establish it.
 	unordered_map<idx_t, shared_ptr<ColumnDataCollection>> recursive_cte_tables;
 	//! Used to reference the recurring tables
-	unordered_map<idx_t, shared_ptr<ColumnDataCollection>> recurring_cte_tables;
+	unordered_map<idx_t, shared_ptr<GroupedAggregateHashTable>> recurring_cte_tables;
 	//! Materialized CTE ids must be collected.
 	unordered_map<idx_t, vector<const_reference<PhysicalOperator>>> materialized_ctes;
 	//! The index for duplicate eliminated joins.

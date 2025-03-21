@@ -66,6 +66,10 @@ public:
 	//! Threshold at which to resize the HT
 	idx_t ResizeThreshold() const;
 	static idx_t ResizeThreshold(idx_t capacity);
+	// Contains the types of the payload and key columns.
+	vector<LogicalType> payload_types, distinct_types;
+	// Contains the payload and key indices
+	vector<idx_t> payload_idx, distinct_idx;
 
 	//! Add the given data to the HT, computing the aggregates grouped by the
 	//! data in the group chunk. When resize = true, aggregates will not be
@@ -183,6 +187,7 @@ private:
 		Vector addresses;
 		DataChunk group_chunk;
 		AggregateDictionaryState dict_state;
+		mutex lock;
 
 		RowOperationsState row_state;
 	} state;
@@ -207,6 +212,9 @@ private:
 	//! Does the actual group matching / creation
 	idx_t FindOrCreateGroupsInternal(DataChunk &groups, Vector &group_hashes, Vector &addresses,
 	                                 SelectionVector &new_groups);
+
+	//! Does the actual group matching / creation
+	void FindGroupsInternal(DataChunk &groups, Vector &group_hashes, Vector &addresses);
 
 	//! Verify the pointer table of the HT
 	void Verify();

@@ -33,18 +33,15 @@ class RecursiveCTEState : public GlobalSinkState {
 public:
 	explicit RecursiveCTEState(ClientContext &context, const PhysicalRecursiveCTE &op)
 	    : intermediate_table(context, op.GetTypes()), new_groups(STANDARD_VECTOR_SIZE) {
-
-		vector<BoundAggregateExpression *> payload_aggregates_ptr;
-		for (idx_t i = 0; i < op.payload_aggregates.size(); i++) {
-			auto &dat = op.payload_aggregates[i];
-			payload_aggregates_ptr.push_back(dat.get());
+		if (!op.ht) {
+			ht = make_uniq<GroupedAggregateHashTable>(context, BufferAllocator::Get(context), op.types,
+			                                          vector<LogicalType>(), vector<BoundAggregateExpression *>());
+		} else {
+			ht = op.ht;
 		}
-
-		ht = make_uniq<GroupedAggregateHashTable>(context, BufferAllocator::Get(context), op.distinct_types,
-		                                          op.payload_types, payload_aggregates_ptr);
 	}
 
-	unique_ptr<GroupedAggregateHashTable> ht;
+	shared_ptr<GroupedAggregateHashTable> ht;
 
 	mutex intermediate_table_lock;
 	ColumnDataCollection intermediate_table;
@@ -112,8 +109,8 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 		if (!using_key) {
 			gstate.intermediate_table.InitializeScan(gstate.scan_state);
 		} else {
+			// Initialise ht scan to fetch the result when the recursion ends
 			gstate.ht->InitializeScan(gstate.ht_scan_state);
-			recurring_table->InitializeScan(gstate.scan_state);
 		}
 		gstate.finished_scan = false;
 		gstate.initialized = true;
@@ -138,6 +135,8 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 			// and fill it up with the new hash table rows for the next iteration.
 			if (using_key && gstate.intermediate_table.Count() != 0) {
 
+				// BTODO: Maybe dont initialize chunks each iteration
+				// BTODO: code duplication
 				// We had read the whole hash table we now can make changes
 				gstate.intermediate_table.InitializeScan(gstate.scan_state);
 				DataChunk changed_rows;
@@ -154,30 +153,6 @@ SourceResultType PhysicalRecursiveCTE::GetData(ExecutionContext &context, DataCh
 
 					// Add the chunk to the hash table and append it to the intermediate table
 					gstate.ht->AddChunk(distinct_rows, payload_rows, AggregateType::NON_DISTINCT);
-				}
-
-				recurring_table->Reset();
-				AggregateHTScanState scan_state;
-				gstate.ht->InitializeScan(scan_state);
-
-				// Initialise the DataChunks to read the resulting rows.
-				// One DataChunk for the payload, one for the keys.
-				// Create a new DataChunk to store the result.
-				DataChunk result;
-				DataChunk payload_rows;
-				DataChunk distinct_rows;
-				distinct_rows.Initialize(Allocator::DefaultAllocator(), distinct_types);
-				if (!payload_types.empty()) {
-					payload_rows.Initialize(Allocator::DefaultAllocator(), payload_types);
-				}
-				result.Initialize(Allocator::DefaultAllocator(), chunk.GetTypes());
-
-				while (gstate.ht->Scan(scan_state, distinct_rows, payload_rows)) {
-					// Populate the result DataChunk with the keys and the payload.
-					PopulateChunk(result, distinct_rows, distinct_idx, false);
-					PopulateChunk(result, payload_rows, payload_idx, false);
-					// Append the result to the recurring table.
-					recurring_table->Append(result);
 				}
 			}
 

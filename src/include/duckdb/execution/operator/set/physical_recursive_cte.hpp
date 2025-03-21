@@ -10,6 +10,7 @@
 
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/execution/physical_operator.hpp"
+#include "duckdb/execution/aggregate_hashtable.hpp"
 #include "duckdb/planner/expression/bound_aggregate_expression.hpp"
 
 namespace duckdb {
@@ -37,14 +38,14 @@ public:
 	// Additionally required for using-key recursive CTE to normal CTE.
 	//===--------------------------------------------------------------------===//
 	bool using_key = false;
-	// Contains the result of the key variant
-	shared_ptr<ColumnDataCollection> recurring_table;
 	// Contains the types of the payload and key columns.
 	vector<LogicalType> payload_types, distinct_types;
 	// Contains the payload and key indices
 	vector<idx_t> payload_idx, distinct_idx;
-	// Contains the aggregates for the payload
-	vector<unique_ptr<BoundAggregateExpression>> payload_aggregates;
+
+	// BTODO:  Maybe as argument not
+	// ht used to filter
+	shared_ptr<GroupedAggregateHashTable> ht;
 
 public:
 	// Source interface

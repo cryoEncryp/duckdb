@@ -582,15 +582,28 @@ void GroupedAggregateHashTable::FetchAggregates(DataChunk &groups, DataChunk &re
 	}
 
 	// find the groups associated with the addresses
-	// FIXME: this should not use the FindOrCreateGroups, creating them is unnecessary
 	Vector addresses(LogicalType::POINTER);
 	Vector hashes(LogicalType::HASH);
 	groups.Hash(hashes);
-	lock_guard<mutex> lock(state.lock);
-	FindGroupsInternal(groups, hashes, addresses);
 
-	// now fetch the aggregates
-	RowOperations::FinalizeStates(state.row_state, *layout_ptr, addresses, result, 0);
+	// Find addresses to rows we are searching
+	FindGroupsInternal(groups, hashes, addresses);
+	Vector addresses_copy(LogicalType::POINTER);
+
+	VectorOperations::Copy(addresses, addresses_copy, groups.size(), 0, 0);
+	VectorOperations::AddInPlace(addresses_copy, UnsafeNumericCast<int64_t>(layout_ptr->GetAggrOffset()), groups.size());
+
+	auto &aggregates = layout_ptr->GetAggregates();
+
+	for (idx_t i = 0; i < aggregates.size(); i++) {
+		auto &target = result.data[i];
+		auto &aggr = aggregates[i];
+
+		AggregateInputData aggr_input_data(aggr.GetFunctionData(), *aggregate_allocator);
+		aggr.function.finalize(addresses_copy, aggr_input_data, target, groups.size(), 0);
+		// Move to the next aggregate state
+		VectorOperations::AddInPlace(addresses_copy, UnsafeNumericCast<int64_t>(aggr.payload_size), groups.size());
+	}
 }
 
 void GroupedAggregateHashTable::FindGroupsInternal(DataChunk &groups, Vector &group_hashes_v,
@@ -616,18 +629,15 @@ void GroupedAggregateHashTable::FindGroupsInternal(DataChunk &groups, Vector &gr
 	}
 	group_chunk.data[groups.ColumnCount()].Reference(group_hashes_v);
 	group_chunk.SetCardinality(groups);
-	ArenaAllocator allocator(Allocator::DefaultAllocator());
 
-	// AggregateHTAppendState state(state.row_state.allocator);
-	PartitionedTupleDataAppendState append_state;
-	GetPartitionedData().InitializeAppendState(append_state,
-	                                           TupleDataPinProperties::KEEP_EVERYTHING_PINNED);
-	// convert all vectors to unified format
-	TupleDataCollection::ToUnifiedFormat(append_state.chunk_state, group_chunk);
+	TupleDataChunkState join_key_state;
+
+	TupleDataCollection::InitializeChunkState(join_key_state, groups.GetTypes());
+	TupleDataCollection::ToUnifiedFormat(join_key_state, groups);
 
 	const auto group_data = make_unsafe_uniq_array_uninitialized<UnifiedVectorFormat>(group_chunk.ColumnCount());
 
-	TupleDataCollection::GetVectorData(append_state.chunk_state, group_data.get());
+	TupleDataCollection::GetVectorData(join_key_state, group_data.get());
 
 	group_hashes_v.Flatten(chunk_size);
 	const auto hashes = FlatVector::GetData<hash_t>(group_hashes_v);
@@ -701,7 +711,7 @@ void GroupedAggregateHashTable::FindGroupsInternal(DataChunk &groups, Vector &gr
 			}
 
 			// Perform group comparisons
-			row_matcher.Match(group_chunk, append_state.chunk_state.vector_data,
+			row_matcher.Match(group_chunk, join_key_state.vector_data,
 			                  compare_vector, need_compare_count, *layout_ptr, addresses_v,
 			                  &no_match_vector, no_match_count);
 		}

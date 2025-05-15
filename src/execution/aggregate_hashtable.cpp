@@ -610,10 +610,7 @@ void GroupedAggregateHashTable::FindGroupsInternal(DataChunk &groups, Vector &gr
                                                     Vector &addresses_v) {
 	D_ASSERT(groups.ColumnCount() + 1 == layout_ptr->ColumnCount());
 	D_ASSERT(group_hashes_v.GetType() == LogicalType::HASH);
-	D_ASSERT(state.ht_offsets.GetVectorType() == VectorType::FLAT_VECTOR);
-	D_ASSERT(state.ht_offsets.GetType() == LogicalType::UBIGINT);
 	D_ASSERT(addresses_v.GetType() == LogicalType::POINTER);
-	D_ASSERT(state.hash_salts.GetType() == LogicalType::HASH);
 
 	// Need to fit the entire vector, and resize at threshold
 	const auto chunk_size = groups.size();
@@ -1022,8 +1019,8 @@ void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optiona
 	Verify();
 }
 
-void GroupedAggregateHashTable::InitializeScan(AggregateHTScanState &scan_state) {
-	scan_state.partition_idx = 0;
+void GroupedAggregateHashTable::InitializeScan(AggregateHTScanState &scan_state, idx_t partition_idx) {
+	scan_state.partition_idx = partition_idx;
 	vector<idx_t> group_indexes(layout_ptr->ColumnCount() - 1);
 	for (idx_t i = 0; i < group_indexes.size(); i++) {
 		group_indexes[i] = i;
@@ -1046,14 +1043,7 @@ bool GroupedAggregateHashTable::Scan(AggregateHTScanState &scan_state, DataChunk
 	if (current_partition->Scan(scan_state.scan_states, distinct_rows)) {
 		FetchAggregates(distinct_rows, payload_rows);
 		return true;
-	} else {
-		if (++(scan_state.partition_idx) >= partitioned_data->PartitionCount()) {
-			return false;
-		} else {
-			auto &new_partition = partitioned_data->GetPartitions()[scan_state.partition_idx];
-			new_partition->InitializeScan(scan_state.scan_states);
-			return true;
-		}
 	}
+	return false;
 }
 } // namespace duckdb

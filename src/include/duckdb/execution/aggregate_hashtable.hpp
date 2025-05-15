@@ -85,7 +85,7 @@ public:
 	//! Fetch the aggregates for specific groups from the HT and place them in the result
 	void FetchAggregates(DataChunk &groups, DataChunk &result);
 
-	void InitializeScan(AggregateHTScanState &scan_state);
+	void InitializeScan(AggregateHTScanState &scan_state, idx_t partition_idx = 0);
 	bool Scan(AggregateHTScanState &scan_state, DataChunk &distinct_rows, DataChunk &payload_rows);
 
 	//! Finds or creates groups in the hashtable using the specified group keys. The addresses vector will be filled

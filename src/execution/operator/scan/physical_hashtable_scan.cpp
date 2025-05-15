@@ -28,44 +28,26 @@ namespace duckdb {
     }
 
 
-    class PhysicalHashTableGlobalScanState : public GlobalSourceState {
-	public:
-	    explicit PhysicalHashTableGlobalScanState(const shared_ptr<GroupedAggregateHashTable> &collection)
-	        : max_threads(MaxValue<idx_t>(1, 1)) {
-		    collection->InitializeScan(global_scan_state);
-	    }
-
-	    idx_t MaxThreads() override {
-		    return max_threads;
-	    }
-
-	public:
-	    AggregateHTScanState global_scan_state;
-	    bool init = false;
-	    const idx_t max_threads;
-	    mutex lock;
-    };
 
     unique_ptr<GlobalSourceState> PhysicalHashTableScan::GetGlobalSourceState(ClientContext &context) const {
 	    return make_uniq<PhysicalHashTableGlobalScanState>(ht);
     }
 
+    unique_ptr<LocalSourceState> PhysicalHashTableScan::GetLocalSourceState(ExecutionContext& context, GlobalSourceState& state) const {
+	    auto& gstate = state.Cast<PhysicalHashTableGlobalScanState>();
+	    return make_uniq<PhysicalHashTableLocalScanState>(gstate);
+    }
+
+
     SourceResultType PhysicalHashTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                                      OperatorSourceInput &input) const {
-	    auto& gstate = input.global_state.Cast<PhysicalHashTableGlobalScanState>();
-		if (!gstate.init) {
-		    ht->InitializeScan(gstate.global_scan_state);
-		    gstate.init = !gstate.init;
-	    }
-	    DataChunk payload;
-	    payload.Initialize(Allocator::DefaultAllocator(), ht->payload_types);
-	    DataChunk keys;
-	    keys.Initialize(Allocator::DefaultAllocator(), ht->distinct_types);
+	    auto& lstate = input.local_state.Cast<PhysicalHashTableLocalScanState>();
 
-	    ht->Scan(gstate.global_scan_state, keys, payload);
+	    ht->Scan(lstate.scan_state, lstate.keys, lstate.payload);
 
-	    PopulateChunk(chunk, keys, ht->distinct_idx, false);
-	    PopulateChunk(chunk, payload, ht->payload_idx, false);
+	    PopulateChunk(chunk, lstate.keys, ht->distinct_idx, false);
+	    PopulateChunk(chunk, lstate.payload, ht->payload_idx, false);
+
 	    return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
     }
 

@@ -97,6 +97,7 @@ PhysicalOperator &PhysicalPlanGenerator::CreatePlan(LogicalRecursiveCTE &op) {
 	cast_cte.ref_recurring = op.ref_recurring;
 	cast_cte.working_table = working_table;
 	cast_cte.recurring_table = recurring_table;
+	cast_cte.col_names = std::move(op.col_names);
 	return cte;
 }
 

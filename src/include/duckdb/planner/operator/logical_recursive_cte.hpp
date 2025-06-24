@@ -24,17 +24,18 @@ public:
 public:
 	LogicalRecursiveCTE(string ctename_p, idx_t table_index, idx_t column_count, bool union_all,
 	                    vector<unique_ptr<Expression>> key_targets, unique_ptr<LogicalOperator> top,
-	                    unique_ptr<LogicalOperator> bottom)
+	                    unique_ptr<LogicalOperator> bottom, vector<string> col_names)
 	    : LogicalCTE(std::move(ctename_p), table_index, column_count, std::move(top), std::move(bottom),
 	                 LogicalOperatorType::LOGICAL_RECURSIVE_CTE),
-	      union_all(union_all), key_targets(std::move(key_targets)) {
+	      union_all(union_all), key_targets(std::move(key_targets)), col_names(std::move(col_names)) {
 	}
 
 	bool union_all;
 	// Flag if recurring table is referenced, if not we do not copy ht into ColumnDataCollection
 	bool ref_recurring;
 	vector<unique_ptr<Expression>> key_targets;
-
+	// Contains column names for render the recurring table
+	vector<string> col_names;
 public:
 	InsertionOrderPreservingMap<string> ParamsToString() const override;
 

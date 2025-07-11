@@ -32,6 +32,14 @@ PartitionedTupleDataType PartitionedTupleData::GetType() const {
 	return type;
 }
 
+idx_t PartitionedTupleData::GetChunkCount() const {
+	idx_t chunk_count = 0;
+	for (auto &i : partitions) {
+		chunk_count += i->ChunkCount();
+	}
+	return chunk_count;
+}
+
 void PartitionedTupleData::InitializeAppendState(PartitionedTupleDataAppendState &state,
                                                  TupleDataPinProperties properties) const {
 	state.partition_sel.Initialize();

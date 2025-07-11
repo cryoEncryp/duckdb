@@ -1020,7 +1020,7 @@ void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optiona
 }
 
 void GroupedAggregateHashTable::InitializeScan(AggregateHTScanState &scan_state, idx_t partition_idx) {
-	scan_state.partition_idx = partition_idx;
+	scan_state.partition_idx = 0;
 	vector<idx_t> group_indexes(layout_ptr->ColumnCount() - 1);
 	for (idx_t i = 0; i < group_indexes.size(); i++) {
 		group_indexes[i] = i;
@@ -1035,15 +1035,18 @@ bool GroupedAggregateHashTable::Scan(AggregateHTScanState &scan_state, DataChunk
 	if (scan_state.partition_idx >= partitioned_data->PartitionCount()) {
 		return false;
 	}
-
+	idx_t partition_idx = scan_state.partition_idx;
 	payload_rows.Reset();
 	distinct_rows.Reset();
 	auto &current_partition = partitioned_data->GetPartitions()[scan_state.partition_idx];
 
-	if (current_partition->Scan(scan_state.scan_states, distinct_rows)) {
+	TupleDataScanState lstate;
+	current_partition->InitializeScan(lstate, payload_idx);
+	if (current_partition->Scan(scan_state.scan_states, lstate, distinct_rows)) {
 		FetchAggregates(distinct_rows, payload_rows);
 		return true;
 	}
+
 	return false;
 }
 } // namespace duckdb

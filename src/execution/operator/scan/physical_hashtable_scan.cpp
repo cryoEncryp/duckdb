@@ -41,9 +41,10 @@ namespace duckdb {
 
     SourceResultType PhysicalHashTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                                      OperatorSourceInput &input) const {
+	    auto& gstate = input.global_state.Cast<PhysicalHashTableGlobalScanState>();
 	    auto& lstate = input.local_state.Cast<PhysicalHashTableLocalScanState>();
 
-	    ht->Scan(lstate.scan_state, lstate.keys, lstate.payload);
+	    ht->Scan(gstate.scan_state, lstate.keys, lstate.payload);
 
 	    PopulateChunk(chunk, lstate.keys, ht->distinct_idx, false);
 	    PopulateChunk(chunk, lstate.payload, ht->payload_idx, false);

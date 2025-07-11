@@ -35,7 +35,7 @@ public:
 	}
 
 	idx_t partition_idx = 0;
-	TupleDataScanState scan_states;
+	TupleDataParallelScanState scan_states;
 };
 
 class GroupedAggregateHashTable : public BaseAggregateHashTable {

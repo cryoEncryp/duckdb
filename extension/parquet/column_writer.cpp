@@ -225,7 +225,7 @@ void ColumnWriter::HandleDefineLevels(ColumnWriterState &state, ColumnWriterStat
 //===--------------------------------------------------------------------===//
 // Used to store the metadata for a WKB-encoded geometry column when writing
 // GeoParquet files.
-class WKBColumnWriterState final : public StandardColumnWriterState<string_t, string_t, ParquetCastOperator> {
+class WKBColumnWriterState final : public StandardColumnWriterState<string_t, string_t, ParquetStringOperator> {
 public:
 	WKBColumnWriterState(ParquetWriter &writer, duckdb_parquet::RowGroup &row_group, idx_t col_idx)
 	    : StandardColumnWriterState(writer, row_group, col_idx), geo_data(), geo_data_writer(writer.GetContext()) {
@@ -271,55 +271,6 @@ public:
 
 private:
 	string column_name;
-};
-
-// special double/float class to deal with dictionary encoding and NaN equality
-struct double_na_equal {
-	double_na_equal() : val(0) {
-	}
-	explicit double_na_equal(const double val_p) : val(val_p) {
-	}
-	// NOLINTNEXTLINE: allow implicit conversion to double
-	operator double() const {
-		return val;
-	}
-
-	bool operator==(const double &right) const {
-		if (std::isnan(val) && std::isnan(right)) {
-			return true;
-		}
-		return val == right;
-	}
-
-	bool operator!=(const double &right) const {
-		return !(*this == right);
-	}
-
-	double val;
-};
-
-struct float_na_equal {
-	float_na_equal() : val(0) {
-	}
-	explicit float_na_equal(const float val_p) : val(val_p) {
-	}
-	// NOLINTNEXTLINE: allow implicit conversion to float
-	operator float() const {
-		return val;
-	}
-
-	bool operator==(const float &right) const {
-		if (std::isnan(val) && std::isnan(right)) {
-			return true;
-		}
-		return val == right;
-	}
-
-	bool operator!=(const float &right) const {
-		return !(*this == right);
-	}
-
-	float val;
 };
 
 //===--------------------------------------------------------------------===//

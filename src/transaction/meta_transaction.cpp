@@ -3,6 +3,7 @@
 #include "duckdb/common/exception/transaction_exception.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
 
 namespace duckdb {
@@ -10,7 +11,8 @@ namespace duckdb {
 MetaTransaction::MetaTransaction(ClientContext &context_p, timestamp_t start_timestamp_p,
                                  transaction_t transaction_id_p)
     : context(context_p), start_timestamp(start_timestamp_p), global_transaction_id(transaction_id_p),
-      active_query(MAXIMUM_QUERY_ID), modified_database(nullptr), is_read_only(false) {
+      transaction_validity(*context_p.db), active_query(MAXIMUM_QUERY_ID), modified_database(nullptr),
+      is_read_only(false) {
 }
 
 MetaTransaction &MetaTransaction::Get(ClientContext &context) {
@@ -156,19 +158,20 @@ void MetaTransaction::SetActiveQuery(transaction_t query_number) {
 }
 
 void MetaTransaction::ModifyDatabase(AttachedDatabase &db) {
-	if (db.IsSystem() || db.IsTemporary()) {
-		// we can always modify the system and temp databases
-		return;
-	}
 	if (IsReadOnly()) {
 		throw TransactionException("Cannot write to database \"%s\" - transaction is launched in read-only mode",
 		                           db.GetName());
 	}
+	auto &transaction = GetTransaction(db);
+	if (transaction.IsReadOnly()) {
+		transaction.SetReadWrite();
+	}
+	if (db.IsSystem() || db.IsTemporary()) {
+		// we can always modify the system and temp databases
+		return;
+	}
 	if (!modified_database) {
 		modified_database = &db;
-
-		auto &transaction = GetTransaction(db);
-		transaction.SetReadWrite();
 		return;
 	}
 	if (&db != modified_database.get()) {

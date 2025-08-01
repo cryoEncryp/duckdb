@@ -41,10 +41,8 @@ py::object PythonTableArrowArrayStreamFactory::ProduceScanner(DBConfig &config, 
 	D_ASSERT(!py::isinstance<py::capsule>(arrow_obj_handle));
 	ArrowSchemaWrapper schema;
 	PythonTableArrowArrayStreamFactory::GetSchemaInternal(arrow_obj_handle, schema);
-	vector<string> unused_names;
-	vector<LogicalType> unused_types;
-	ArrowTableType arrow_table;
-	ArrowTableFunction::PopulateArrowTableType(config, arrow_table, schema, unused_names, unused_types);
+	ArrowTableSchema arrow_table;
+	ArrowTableFunction::PopulateArrowTableSchema(config, arrow_table, schema.arrow_schema);
 
 	auto filters = parameters.filters;
 	auto &column_list = parameters.projected_columns.columns;
@@ -279,8 +277,13 @@ py::object GetScalar(Value &constant, const string &timezone_config, const Arrow
 		return dataset_scalar(constant.GetValue<double>());
 	case LogicalTypeId::VARCHAR:
 		return dataset_scalar(constant.ToString());
-	case LogicalTypeId::BLOB:
+	case LogicalTypeId::BLOB: {
+		if (type.GetTypeInfo<ArrowStringInfo>().GetSizeType() == ArrowVariableSizeType::VIEW) {
+			py::object binary_view_type = py::module_::import("pyarrow").attr("binary_view");
+			return dataset_scalar(scalar(py::bytes(constant.GetValueUnsafe<string>()), binary_view_type()));
+		}
 		return dataset_scalar(py::bytes(constant.GetValueUnsafe<string>()));
+	}
 	case LogicalTypeId::DECIMAL: {
 		py::object decimal_type;
 		auto &datetime_info = type.GetTypeInfo<ArrowDecimalInfo>();
@@ -447,6 +450,10 @@ py::object TransformFilterRecursive(TableFilter &filter, vector<string> column_r
 		}
 		return TransformFilterRecursive(or_filter, column_ref, timezone_config, type);
 	}
+	case TableFilterType::DYNAMIC_FILTER: {
+		//! Ignore dynamic filters for now, not necessary for correctness
+		return py::none();
+	}
 	default:
 		throw NotImplementedException("Pushdown Filter Type %s is not currently supported in PyArrow Scans",
 		                              EnumUtil::ToString(filter.filter_type));
@@ -457,7 +464,7 @@ py::object PythonTableArrowArrayStreamFactory::TransformFilter(TableFilterSet &f
                                                                std::unordered_map<idx_t, string> &columns,
                                                                unordered_map<idx_t, idx_t> filter_to_col,
                                                                const ClientProperties &config,
-                                                               const ArrowTableType &arrow_table) {
+                                                               const ArrowTableSchema &arrow_table) {
 	auto &filters_map = filter_collection.filters;
 
 	py::object expression = py::none();

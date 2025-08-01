@@ -18,39 +18,30 @@ namespace duckdb {
 class PhysicalHashTableGlobalScanState : public GlobalSourceState {
 public:
 	PhysicalHashTableGlobalScanState(const shared_ptr<GroupedAggregateHashTable> &collection)
-	    : collection(collection), max_threads(MaxValue<idx_t>(collection->GetPartitionedData().GetChunkCount(), 1)),
-	payload_types(collection->payload_types), distinct_types(collection->distinct_types) {
-		collection->InitializeScan(scan_state, partition_idx);
+	    : payload_types(collection->payload_types), distinct_types(collection->distinct_types),
+	      max_threads(MaxValue<idx_t>(collection->GetPartitionedData().GetChunkCount(), 1)) {
+		collection->InitializeScan(scan_state);
 	}
 
 	idx_t MaxThreads() override {
 		return max_threads;
 	}
+	const vector<LogicalType> &payload_types, &distinct_types;
 	const idx_t max_threads = 1;
-	const shared_ptr<GroupedAggregateHashTable> &collection;
-	const vector<LogicalType>& payload_types, &distinct_types;
-	idx_t partition_idx = 0;
-	bool init = false;
 	mutex lock;
 	AggregateHTScanState scan_state;
-	TupleDataParallelScanState partition_scan;
 };
 
 
 class PhysicalHashTableLocalScanState : public LocalSourceState {
 public:
 	PhysicalHashTableLocalScanState(PhysicalHashTableGlobalScanState &gstate) {
-		partition_idx = gstate.partition_idx;
 		// Initialize chunks to scan partition
 		payload.Initialize(Allocator::DefaultAllocator(), gstate.payload_types);
 		keys.Initialize(Allocator::DefaultAllocator(), gstate.distinct_types);
 	}
-	// index of the partition that is scanned
-	idx_t partition_idx;
 	DataChunk payload;
 	DataChunk keys;
-
-	bool init = false;
 };
 
 

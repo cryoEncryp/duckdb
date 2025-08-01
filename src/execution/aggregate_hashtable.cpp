@@ -41,9 +41,10 @@ GroupedAggregateHashTable::GroupedAggregateHashTable(ClientContext &context_p, A
                                                      vector<LogicalType> payload_types_p,
                                                      vector<AggregateObject> aggregate_objects_p,
                                                      idx_t initial_capacity, idx_t radix_bits)
-    : BaseAggregateHashTable(context_p, allocator, aggregate_objects_p, std::move(payload_types_p)), context(context_p),
-      radix_bits(radix_bits), count(0), capacity(0), sink_count(0), skip_lookups(false), enable_hll(false),
-      aggregate_allocator(make_shared_ptr<ArenaAllocator>(allocator)), state(*aggregate_allocator) {
+    : BaseAggregateHashTable(context_p, allocator, aggregate_objects_p, payload_types_p), payload_types(payload_types_p),
+      distinct_types(group_types_p), context(context_p), radix_bits(radix_bits), count(0), capacity(0), sink_count(0),
+      skip_lookups(false), enable_hll(false), aggregate_allocator(make_shared_ptr<ArenaAllocator>(allocator)),
+      state(*aggregate_allocator) {
 
 	// Append hash column to the end and initialise the row layout
 	group_types_p.emplace_back(LogicalType::HASH);
@@ -582,152 +583,11 @@ void GroupedAggregateHashTable::FetchAggregates(DataChunk &groups, DataChunk &re
 	}
 
 	// find the groups associated with the addresses
-	Vector addresses(LogicalType::POINTER);
-	Vector hashes(LogicalType::HASH);
-	groups.Hash(hashes);
-
-	// Find addresses to rows we are searching
-	FindGroupsInternal(groups, hashes, addresses);
-	Vector addresses_copy(LogicalType::POINTER);
-
-	VectorOperations::Copy(addresses, addresses_copy, groups.size(), 0, 0);
-	VectorOperations::AddInPlace(addresses_copy, UnsafeNumericCast<int64_t>(layout_ptr->GetAggrOffset()), groups.size());
-
-	auto &aggregates = layout_ptr->GetAggregates();
-
-	for (idx_t i = 0; i < aggregates.size(); i++) {
-		auto &target = result.data[i];
-		auto &aggr = aggregates[i];
-
-		AggregateInputData aggr_input_data(aggr.GetFunctionData(), *aggregate_allocator);
-		aggr.function.finalize(addresses_copy, aggr_input_data, target, groups.size(), 0);
-		// Move to the next aggregate state
-		VectorOperations::AddInPlace(addresses_copy, UnsafeNumericCast<int64_t>(aggr.payload_size), groups.size());
-	}
+	// FIXME: this should not use the FindOrCreateGroups, creating them is unnecessary
+	FindOrCreateGroups(groups, state.addresses);
+	// now fetch the aggregates
+	RowOperations::FinalizeStates(state.row_state, *layout_ptr, state.addresses, result, 0);
 }
-
-void GroupedAggregateHashTable::FindGroupsInternal(DataChunk &groups, Vector &group_hashes_v,
-                                                    Vector &addresses_v) {
-	D_ASSERT(groups.ColumnCount() + 1 == layout_ptr->ColumnCount());
-	D_ASSERT(group_hashes_v.GetType() == LogicalType::HASH);
-	D_ASSERT(addresses_v.GetType() == LogicalType::POINTER);
-
-	// Need to fit the entire vector, and resize at threshold
-	const auto chunk_size = groups.size();
-
-	// we start out with all entries [0, 1, 2, ..., chunk_size]
-	const SelectionVector *sel_vector = FlatVector::IncrementalSelectionVector();
-	// Make a chunk that references the groups and the hashes and convert to unified format
-	DataChunk group_chunk;
-	group_chunk.InitializeEmpty(layout_ptr->GetTypes());
-	D_ASSERT(group_chunk.ColumnCount() == layout_ptr->GetTypes().size());
-	for (idx_t grp_idx = 0; grp_idx < groups.ColumnCount(); grp_idx++) {
-		group_chunk.data[grp_idx].Reference(groups.data[grp_idx]);
-	}
-	group_chunk.data[groups.ColumnCount()].Reference(group_hashes_v);
-	group_chunk.SetCardinality(groups);
-
-	TupleDataChunkState join_key_state;
-
-	TupleDataCollection::InitializeChunkState(join_key_state, groups.GetTypes());
-	TupleDataCollection::ToUnifiedFormat(join_key_state, groups);
-
-	const auto group_data = make_unsafe_uniq_array_uninitialized<UnifiedVectorFormat>(group_chunk.ColumnCount());
-
-	TupleDataCollection::GetVectorData(join_key_state, group_data.get());
-
-	group_hashes_v.Flatten(chunk_size);
-	const auto hashes = FlatVector::GetData<hash_t>(group_hashes_v);
-
-	addresses_v.Flatten(chunk_size);
-	const auto addresses = FlatVector::GetData<data_ptr_t>(addresses_v);
-	Vector v_hashes(LogicalType::HASH);
-	Vector v_offsets(LogicalType::UBIGINT);
-	Vector v_hash_salts(LogicalType::HASH);
-
-	// Compute the entry in the table based on the hash using a modulo,
-	// and precompute the hash salts for faster comparison below
-	const auto ht_offsets = FlatVector::GetData<uint64_t>(v_offsets);
-	const auto hash_salts = FlatVector::GetData<hash_t>(v_hash_salts);
-
-	// We also compute the occupied count, which is essentially useless.
-	// However, this loop is branchless, while the main lookup loop below is not.
-	// So, by doing the lookups here, we better amortize cache misses.
-	idx_t occupied_count = 0;
-	for (idx_t r = 0; r < chunk_size; r++) {
-		const auto &hash = hashes[r];
-		auto &ht_offset = ht_offsets[r];
-		ht_offset = ApplyBitMask(hash);
-		occupied_count += entries[ht_offset].IsOccupied(); // Lookup
-		D_ASSERT(ht_offset == hash % capacity);
-		hash_salts[r] = ht_entry_t::ExtractSalt(hash);
-	}
-
-	// Vector containing all indices to groups to be compared with ht
-	SelectionVector compare_vector;
-	compare_vector.Initialize();
-
-	SelectionVector no_match_vector;
-	no_match_vector.Initialize();
-
-	idx_t remaining_entries = chunk_size;
-	idx_t iteration_count;
-	for (iteration_count = 0; remaining_entries > 0 && iteration_count < capacity; iteration_count++) {
-		idx_t need_compare_count = 0;
-		idx_t no_match_count = 0;
-
-		// For each remaining entry, figure out whether or not it belongs to a full or empty group
-		for (idx_t i = 0; i < remaining_entries; i++) {
-			const auto index = sel_vector->get_index(i);
-			const auto salt = hash_salts[index];
-			auto &ht_offset = ht_offsets[index];
-
-			idx_t inner_iteration_count;
-			for (inner_iteration_count = 0; inner_iteration_count < capacity; inner_iteration_count++) {
-				auto &entry = entries[ht_offset];
-				if (!entry.IsOccupied()) { // Unoccupied: claim it
-					// BTODO: what should we do if do not find an entry
-					break;
-				}
-
-				if (DUCKDB_LIKELY(entry.GetSalt() == salt)) { // Matching salt: compare groups
-					compare_vector.set_index(need_compare_count++, index);
-					break;
-				}
-				// Linear probing
-				IncrementAndWrap(ht_offset, bitmask);
-			}
-		}
-
-		if (need_compare_count != 0) {
-			// Get the pointers to the rows that need to be compared
-			for (idx_t need_compare_idx = 0; need_compare_idx < need_compare_count; need_compare_idx++) {
-				const auto &index = compare_vector[need_compare_idx];
-				const auto &entry = entries[ht_offsets[index]];
-				addresses[index] = entry.GetPointer();
-			}
-
-			// Perform group comparisons
-			row_matcher.Match(group_chunk, join_key_state.vector_data,
-			                  compare_vector, need_compare_count, *layout_ptr, addresses_v,
-			                  &no_match_vector, no_match_count);
-		}
-
-		// Linear probing: each of the entries that do not match move to the next entry in the HT
-		for (idx_t i = 0; i < no_match_count; i++) {
-			const auto &index = no_match_vector[i];
-			auto &ht_offset = ht_offsets[index];
-			IncrementAndWrap(ht_offset, bitmask);
-		}
-		sel_vector = &no_match_vector;
-		// some rows had a match in the HT, but their columns were different.
-		remaining_entries = no_match_count;
-	}
-	if (iteration_count == capacity) {
-		throw InternalException("Maximum outer iteration count reached in GroupedAggregateHashTable");
-	}
-}
-
 
 idx_t GroupedAggregateHashTable::FindOrCreateGroupsInternal(DataChunk &groups, Vector &group_hashes_v,
                                                             Vector &addresses_v, SelectionVector &new_groups_out) {
@@ -1019,34 +879,183 @@ void GroupedAggregateHashTable::Combine(TupleDataCollection &other_data, optiona
 	Verify();
 }
 
-void GroupedAggregateHashTable::InitializeScan(AggregateHTScanState &scan_state, idx_t partition_idx) {
-	scan_state.partition_idx = 0;
+void GroupedAggregateHashTable::InitializeScan(AggregateHTScanState &scan_state) {
 	vector<idx_t> group_indexes(layout_ptr->ColumnCount() - 1);
 	for (idx_t i = 0; i < group_indexes.size(); i++) {
 		group_indexes[i] = i;
 	}
 
-	auto &partition = partitioned_data->GetPartitions()[scan_state.partition_idx];
-	partition->InitializeScan(scan_state.scan_states, group_indexes);
+	// start scanning the first partition
+	auto &partition = partitioned_data->GetPartitions()[0];
+	partition->InitializeScan(scan_state.tuple_data_gstate, group_indexes);
 }
 
-bool GroupedAggregateHashTable::Scan(AggregateHTScanState &scan_state, DataChunk &distinct_rows,
+bool GroupedAggregateHashTable::Scan(AggregateHTScanState &gstate, DataChunk &distinct_rows,
                                      DataChunk &payload_rows) {
-	if (scan_state.partition_idx >= partitioned_data->PartitionCount()) {
+	// save current partition idx and check whether the partition count has been exceeded
+	idx_t partition_idx = gstate.partition_idx;
+	if (partition_idx >= partitioned_data->PartitionCount()) {
 		return false;
 	}
-	idx_t partition_idx = scan_state.partition_idx;
-	payload_rows.Reset();
-	distinct_rows.Reset();
-	auto &current_partition = partitioned_data->GetPartitions()[scan_state.partition_idx];
 
+	// initialize local state
+	auto &current_partition = partitioned_data->GetPartitions()[partition_idx];
 	TupleDataScanState lstate;
-	current_partition->InitializeScan(lstate, payload_idx);
-	if (current_partition->Scan(scan_state.scan_states, lstate, distinct_rows)) {
-		FetchAggregates(distinct_rows, payload_rows);
-		return true;
+	current_partition->InitializeScan(lstate, distinct_idx);
+
+	// try to scan partition if it fails, try update global partition index
+	while(!partitioned_data->GetPartitions()[partition_idx]->Scan(gstate.tuple_data_gstate, lstate, distinct_rows)) {
+		// scan of partition has finished, check if there is another partition
+		{
+			lock_guard<mutex> lock(gstate.lock);
+			// partition index has not yet been changed, change to the next partition
+			if (gstate.partition_idx == partition_idx) {
+				gstate.partition_idx++;
+			}
+			// set the local partition index to the global index and check whether the partition count has been exceeded
+			partition_idx = gstate.partition_idx;
+			if (gstate.partition_idx >= partitioned_data->PartitionCount()) {
+				return false;
+			}
+		}
+		partitioned_data->GetPartitions()[partition_idx]->InitializeScan(lstate, distinct_idx);
 	}
 
-	return false;
+	// find the groups associated with the addresses
+	Vector addresses(LogicalType::POINTER);
+	Vector hashes(LogicalType::HASH);
+	distinct_rows.Hash(hashes);
+
+	// find addresses to rows we are searching
+	FindExistingGroups(distinct_rows, hashes, addresses);;
+
+	payload_rows.SetCardinality(distinct_rows);
+	// set address location to the first aggregate
+	VectorOperations::AddInPlace(addresses, UnsafeNumericCast<int64_t>(layout_ptr->GetAggrOffset()), distinct_rows.size());
+	auto &aggregates = layout_ptr->GetAggregates();
+	for (idx_t i = 0; i < aggregates.size(); i++) {
+		auto &target = payload_rows.data[i];
+		auto &aggr = aggregates[i];
+
+		// get the aggregated value and save it in the payload vector
+		AggregateInputData aggr_input_data(aggr.GetFunctionData(), *aggregate_allocator);
+		aggr.function.finalize(addresses, aggr_input_data, target, distinct_rows.size(), 0);
+
+		// move to the next aggregate
+		VectorOperations::AddInPlace(addresses, UnsafeNumericCast<int64_t>(aggr.payload_size), distinct_rows.size());
+	}
+	return true;
 }
+
+
+void GroupedAggregateHashTable::FindExistingGroups(DataChunk &groups, Vector &group_hashes_v,
+                                                   Vector &addresses_v) {
+	D_ASSERT(groups.ColumnCount() + 1 == layout_ptr->ColumnCount());
+	D_ASSERT(group_hashes_v.GetType() == LogicalType::HASH);
+	D_ASSERT(addresses_v.GetType() == LogicalType::POINTER);
+
+	// Number of entries we have to search
+	const auto chunk_size = groups.size();
+
+	// BTODO: do not create an extra state for this.
+	TupleDataChunkState join_key_state;
+	TupleDataCollection::InitializeChunkState(join_key_state, groups.GetTypes());
+	TupleDataCollection::ToUnifiedFormat(join_key_state, groups);
+
+	group_hashes_v.Flatten(chunk_size);
+	const auto hashes = FlatVector::GetData<hash_t>(group_hashes_v);
+
+	addresses_v.Flatten(chunk_size);
+	const auto addresses = FlatVector::GetData<data_ptr_t>(addresses_v);
+
+	Vector v_offsets(LogicalType::UBIGINT);
+	Vector v_hash_salts(LogicalType::HASH);
+
+	// Compute the entry in the table based on the hash using a modulo,
+	// and precompute the hash salts for faster comparison below
+	const auto ht_offsets = FlatVector::GetData<uint64_t>(v_offsets);
+	const auto hash_salts = FlatVector::GetData<hash_t>(v_hash_salts);
+
+	// We also compute the occupied count, which is essentially useless.
+	// However, this loop is branchless, while the main lookup loop below is not.
+	// So, by doing the lookups here, we better amortize cache misses.
+	idx_t occupied_count = 0;
+	for (idx_t r = 0; r < chunk_size; r++) {
+		const auto &hash = hashes[r];
+		auto &ht_offset = ht_offsets[r];
+		ht_offset = ApplyBitMask(hash);
+		occupied_count += entries[ht_offset].IsOccupied(); // Lookup
+		D_ASSERT(ht_offset == hash % capacity);
+		hash_salts[r] = ht_entry_t::ExtractSalt(hash);
+	}
+
+	// Vector containing all indices to groups to be compared with ht
+	SelectionVector compare_vector;
+	compare_vector.Initialize();
+
+	SelectionVector no_match_vector;
+	no_match_vector.Initialize();
+
+	// we start out with all entries [0, 1, 2, ..., chunk_size]
+	const SelectionVector *sel_vector = FlatVector::IncrementalSelectionVector();
+
+	idx_t remaining_entries = chunk_size;
+	idx_t iteration_count;
+	for (iteration_count = 0; remaining_entries > 0 && iteration_count < capacity; iteration_count++) {
+		idx_t need_compare_count = 0;
+		idx_t no_match_count = 0;
+
+		// For each remaining entry, figure out whether or not it belongs to a full or empty group
+		for (idx_t i = 0; i < remaining_entries; i++) {
+			const auto index = sel_vector->get_index(i);
+			const auto salt = hash_salts[index];
+			auto &ht_offset = ht_offsets[index];
+
+			for (idx_t inner_iteration_count = 0; inner_iteration_count < capacity; inner_iteration_count++) {
+				auto &entry = entries[ht_offset];
+				if (!entry.IsOccupied()) {
+					throw InternalException("Found a group that did not exist.");
+				}
+
+				if (DUCKDB_LIKELY(entry.GetSalt() == salt)) { // Matching salt: compare groups
+					compare_vector.set_index(need_compare_count++, index);
+					break;
+				}
+				// salt didn't match so we check next entry
+				IncrementAndWrap(ht_offset, bitmask);
+			}
+		}
+
+		// We found some entries where the salt matches
+		if (need_compare_count != 0) {
+			// Get the pointers to the rows that need to be compared
+			for (idx_t need_compare_idx = 0; need_compare_idx < need_compare_count; need_compare_idx++) {
+				const auto &index = compare_vector[need_compare_idx];
+				const auto &entry = entries[ht_offsets[index]];
+				addresses[index] = entry.GetPointer();
+			}
+
+			// Perform group comparisons
+			row_matcher.Match(groups, join_key_state.vector_data,
+			                  compare_vector, need_compare_count, *layout_ptr, addresses_v,
+			                  &no_match_vector, no_match_count);
+		}
+
+		// Linear probing: each of the entries that do not match move to the next entry in the HT
+		for (idx_t i = 0; i < no_match_count; i++) {
+			const auto &index = no_match_vector[i];
+			auto &ht_offset = ht_offsets[index];
+			// for some rows, the salt matches, but the columns are different -> do linear probing.
+			IncrementAndWrap(ht_offset, bitmask);
+		}
+
+		sel_vector = &no_match_vector;
+		remaining_entries = no_match_count;
+	}
+	if (iteration_count == capacity) {
+		throw InternalException("Maximum outer iteration count reached in GroupedAggregateHashTable");
+	}
+}
+
+
 } // namespace duckdb

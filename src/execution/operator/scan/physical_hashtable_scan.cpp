@@ -44,6 +44,9 @@ namespace duckdb {
 	    auto& gstate = input.global_state.Cast<PhysicalHashTableGlobalScanState>();
 	    auto& lstate = input.local_state.Cast<PhysicalHashTableLocalScanState>();
 
+	    lstate.keys.Reset();
+	    lstate.payload.Reset();
+
 	    ht->Scan(gstate.scan_state, lstate.keys, lstate.payload);
 
 	    PopulateChunk(chunk, lstate.keys, ht->distinct_idx, false);

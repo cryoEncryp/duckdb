@@ -35,7 +35,8 @@ public:
 	}
 
 	idx_t partition_idx = 0;
-	TupleDataParallelScanState scan_states;
+	TupleDataParallelScanState tuple_data_gstate;
+	mutex lock;
 };
 
 class GroupedAggregateHashTable : public BaseAggregateHashTable {
@@ -85,7 +86,7 @@ public:
 	//! Fetch the aggregates for specific groups from the HT and place them in the result
 	void FetchAggregates(DataChunk &groups, DataChunk &result);
 
-	void InitializeScan(AggregateHTScanState &scan_state, idx_t partition_idx = 0);
+	void InitializeScan(AggregateHTScanState &scan_state);
 	bool Scan(AggregateHTScanState &scan_state, DataChunk &distinct_rows, DataChunk &payload_rows);
 
 	//! Finds or creates groups in the hashtable using the specified group keys. The addresses vector will be filled
@@ -227,7 +228,7 @@ private:
 	                                 SelectionVector &new_groups);
 
 	//! Does the actual group matching / creation
-	void FindGroupsInternal(DataChunk &groups, Vector &group_hashes, Vector &addresses);
+	void FindExistingGroups(DataChunk &groups, Vector &group_hashes, Vector &addresses);
 
 	//! Verify the pointer table of the HT
 	void Verify();

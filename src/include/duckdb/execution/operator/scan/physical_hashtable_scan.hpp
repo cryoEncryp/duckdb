@@ -49,8 +49,8 @@ class PhysicalHashTableScan : public PhysicalOperator {
 public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::INVALID;
 public:
-	PhysicalHashTableScan(vector<LogicalType> types, PhysicalOperatorType op_type, idx_t estimated_cardinality,
-	                      shared_ptr<GroupedAggregateHashTable> collection_p);
+	PhysicalHashTableScan(PhysicalPlan &physical_plan, vector<LogicalType> types, PhysicalOperatorType op_type,
+	                      idx_t estimated_cardinality, shared_ptr<GroupedAggregateHashTable> collection_p);
 
 	shared_ptr<GroupedAggregateHashTable> ht;
 	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;

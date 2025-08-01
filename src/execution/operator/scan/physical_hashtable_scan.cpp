@@ -6,10 +6,10 @@
 
 namespace duckdb {
 
-	PhysicalHashTableScan::PhysicalHashTableScan(vector<LogicalType> types, PhysicalOperatorType op_type,
-                                             	 idx_t estimated_cardinality,
+	PhysicalHashTableScan::PhysicalHashTableScan(PhysicalPlan &physical_plan, vector<LogicalType> types,
+                                             	 PhysicalOperatorType op_type,idx_t estimated_cardinality,
                                              	 shared_ptr<GroupedAggregateHashTable> collection_p)
-	    : PhysicalOperator(op_type, std::move(types), estimated_cardinality), ht(collection_p) {
+	    : PhysicalOperator(physical_plan, op_type, std::move(types), estimated_cardinality), ht(collection_p) {
     }
 
     void PhysicalHashTableScan::PopulateChunk(DataChunk &group_chunk, DataChunk &input_chunk, const vector<idx_t> &idx_set, bool reference) const {

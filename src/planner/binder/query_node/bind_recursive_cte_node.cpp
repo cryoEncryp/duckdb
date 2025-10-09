@@ -143,8 +143,7 @@ BoundStatement Binder::BindNode(RecursiveCTENode &statement) {
 			if (column_references.find(i) == column_references.end()) {
 				// Create a new bound column reference for the missing columns
 				vector<unique_ptr<Expression>> first_children;
-				auto bound =
-				    make_uniq<BoundColumnRefExpression>(result.types[i], ColumnBinding(result.setop_index, i));
+				auto bound = make_uniq<BoundColumnRefExpression>(result.types[i], ColumnBinding(result.setop_index, i));
 				first_children.push_back(std::move(bound));
 
 				// Create a last aggregate for the newly bound column reference
@@ -161,9 +160,8 @@ BoundStatement Binder::BindNode(RecursiveCTENode &statement) {
 
 	// Add bindings of left side to temporary CTE bindings context
 	result.right_binder->bind_context.AddCTEBinding(result.setop_index, statement.ctename, result.names,
-	                                                 result.internal_types, result.types,
-	                                                 !statement.key_targets.empty());
-
+	                                                result.internal_types, result.types,
+	                                                !statement.key_targets.empty());
 
 	result.right = result.right_binder->BindNode(*statement.right);
 	for (auto &c : result.left_binder->correlated_columns) {

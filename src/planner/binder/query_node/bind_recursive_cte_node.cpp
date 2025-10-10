@@ -3,16 +3,9 @@
 #include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/query_node/recursive_cte_node.hpp"
 #include "duckdb/planner/binder.hpp"
-//<<<<<<< HEAD
-//#include "duckdb/function/function_binder.hpp"
-//#include "duckdb/planner/query_node/bound_recursive_cte_node.hpp"
-//#include "duckdb/planner/query_node/bound_select_node.hpp"
-//=======
 #include "duckdb/catalog/catalog_entry/aggregate_function_catalog_entry.hpp"
 #include "duckdb/planner/operator/logical_set_operation.hpp"
 #include "duckdb/planner/operator/logical_recursive_cte.hpp"
-
-//>>>>>>> main
 
 namespace duckdb {
 
